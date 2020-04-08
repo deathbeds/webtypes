@@ -1,5 +1,4 @@
-extensions.append('autoapi.extension')
-extensions.append('sphinx.ext.napoleon')
+extensions = 'autoapi.extension sphinx.ext.napoleon'.split()
 
 autoapi_type = 'python'
 autoapi_dirs = ['.']
