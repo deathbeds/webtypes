@@ -749,17 +749,17 @@ if __name__ == "__main__":
         import IPython
 
         get_ipython().system(
-            "jupyter nbconvert --to python --TemplateExporter.exclude_input_prompt=True webtypes.ipynb"
+            "jupyter nbconvert --to python --TemplateExporter.exclude_input_prompt=True wtypes.ipynb"
         )
         with IPython.utils.capture.capture_output():
-            get_ipython().system("black webtypes.py")
-        get_ipython().system("isort webtypes.py")
-        get_ipython().system("ipython -m coverage -- run webtypes.py covtest")
+            get_ipython().system("black wtypes.py")
+        get_ipython().system("isort wtypes.py")
+        get_ipython().system("ipython -m coverage -- run wtypes.py covtest")
         get_ipython().system("coverage report")
         get_ipython().system("coverage html")
         with IPython.utils.capture.capture_output():
-            get_ipython().system("pyreverse webtypes -osvg -pwebtypes")
-        IPython.display.display(IPython.display.SVG("classes_webtypes.svg"))
+            get_ipython().system("pyreverse wtypes -osvg -pwtypes")
+        IPython.display.display(IPython.display.SVG("classes_wtypes.svg"))
         with IPython.utils.capture.capture_output():
-            get_ipython().system("pyreverse poser -osvg -pwebtypes -my -s1")
-        IPython.display.display(IPython.display.SVG("classes_webtypes.svg"))
+            get_ipython().system("pyreverse wtypes -osvg -pwtypes -my -s1")
+        IPython.display.display(IPython.display.SVG("classes_wtypes.svg"))
