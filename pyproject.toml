@@ -13,7 +13,7 @@ requires = [
 keywords = []
 home-page = "https://github.com/deathbeds/wtypes"
 license = "BSD-3-Clause"
-description-file = "readme.md"
+description-file = "README.md"
 
 
 [tool.flit.metadata.requires-extra]
