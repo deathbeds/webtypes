@@ -12,7 +12,7 @@ Attributes
 ----------
 simpleTypes : list
     The limited set of base types provide by jsonschema.
-    
+
 Todo
 ---
 * Configuration Files
@@ -22,6 +22,7 @@ Todo
 .. ``jsonschema`` documentation:
    https://json-schema.org/
 """
+__version__ = "0.0.1"
 
 
 class _NoTitle:
