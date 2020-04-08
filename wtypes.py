@@ -25,14 +25,6 @@ Todo
 __version__ = "0.0.1"
 
 
-class _NoTitle:
-    ...
-
-
-class _NoInit:
-    ...
-
-
 import abc
 import copy
 import dataclasses
@@ -42,9 +34,18 @@ import typing
 
 import jsonschema
 import munch
-import pytest
 
-invalid = pytest.raises(jsonschema.ValidationError)
+
+class _NoTitle:
+    ...
+
+
+class _NoInit:
+    """Subclass this module to restrict initializing an object from the type."""
+
+    def __new__(cls, *args, **kwargs):
+        raise TypeError(f"Cannot initialize the type : {cls.__name__}")
+
 
 simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes"][
     "enum"
@@ -139,13 +140,14 @@ jsonschema.ValidationError
         cls.schema = schema
 
     def __new__(cls, name, base, kwargs, **schema):
+        global simpleTypes
         if "type" in schema and schema["type"] not in simpleTypes:
             ...
         cls = super().__new__(cls, name, base, kwargs)
 
         # Combine metadata across the module resolution order.
         cls._merge_annotations(), cls._merge_schema()
-        cls.schema.update({**dict(title=cls.__name__), **schema})
+        cls.schema.update(schema)
 
         jsonschema.validate(
             cls.schema, cls.meta_schema, format_checker=jsonschema.draft7_format_checker
@@ -251,7 +253,7 @@ class _ContainerType(_ConstType):
         return cls + Trait.create(schema_key, **{schema_key: object})
 
 
-class Trait(_NoTitle, metaclass=_SchemaMeta):
+class Trait(metaclass=_SchemaMeta):
     """A trait is an object validated by a validate ``jsonschema``."""
 
     def __new__(cls, *args, **kwargs):
@@ -277,12 +279,27 @@ object
         return self
 
 
+class Description(Trait, _NoTitle, metaclass=_ConstType):
+    ...
+
+
+class Examples(Trait, metaclass=_ConstType):
+    ...
+
+
+class Title(Trait, metaclass=_ConstType):
+    ...
+
+
+class Const(Trait, metaclass=_ConstType):
+    ...
+
+
 # ## Logical Types
 
 
 class Bool(metaclass=_SchemaMeta, type="boolean"):
-    def __new__(cls, *args):
-        """Boolean types.
+    """Boolean types.
         
 Examples
 --------
@@ -296,14 +313,14 @@ It is not possible to base class ``bool`` so object creation is customized.
     
 """
 
+    def __new__(cls, *args):
         args = args or (bool(),)
         args and cls.validate(args[0])
         return args[0]
 
 
 class Null(metaclass=_SchemaMeta, type="null"):
-    def __new__(cls, *args):
-        """nil, none, null type
+    """nil, none, null type
         
 Examples
 --------
@@ -312,30 +329,12 @@ Examples
     
     
 """
+
+    def __new__(cls, *args):
         args and cls.validate(args[0])
 
 
 # ## Numeric Types
-
-
-class MultipleOf(_NoInit, Trait, metaclass=_ConstType):
-    ...
-
-
-class Minimum(_NoInit, Trait, metaclass=_ConstType):
-    ...
-
-
-class ExclusiveMinimum(_NoInit, Trait, metaclass=_ConstType):
-    ...
-
-
-class Maximum(_NoInit, Trait, metaclass=_ConstType):
-    ...
-
-
-class ExclusiveMaximum(_NoInit, Trait, metaclass=_ConstType):
-    ...
 
 
 class _NumericSchema(_SchemaMeta):
@@ -356,23 +355,23 @@ class _NumericSchema(_SchemaMeta):
     __rlt__ = __gt__
     __rle__ = __ge__
 
+    def __truediv__(cls, object):
+        return cls + MultipleOf[object]
+
 
 class Integer(Trait, int, metaclass=_NumericSchema, type="integer"):
     """integer type
     
     
 >>> assert isinstance(10, Float)
->>> with invalid: Float('10.1')
 
 >>> bounded = (10< Float)< 100
 >>> bounded.schema.toDict()
-{'title': 'ExclusiveMaximum', 'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+{'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
  
 >>> assert isinstance(12, bounded)
 >>> assert not isinstance(0, bounded)
 
->>> with invalid: bounded(0)
->>> with invalid: (Integer+MultipleOf[3])(1)
 >>> assert (Integer+MultipleOf[3])(9) == 9
 
 
@@ -388,22 +387,15 @@ class Float(Trait, float, metaclass=_NumericSchema, type="number"):
     
 >>> assert isinstance(10, Integer)
 >>> assert not isinstance(10.1, Integer)
->>> with invalid: Integer(10.1)
 
 >>> bounded = (10< Integer)< 100
 >>> bounded.schema.toDict()
-{'title': 'ExclusiveMaximum', 'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+{'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
  
 >>> assert isinstance(12, bounded)
 >>> assert not isinstance(0, bounded)
 
->>> with invalid: bounded(0)
->>> with invalid: (Integer+MultipleOf[3])(1)
->>> assert (Integer+MultipleOf[3])(9) == 9
-
-
-.. Numeric Types
-    https://json-schema.org/understanding-json-schema/reference/numeric.html
+>>> assert (Integer/3)(9) == 9
     
     """
 
@@ -428,11 +420,201 @@ class ExclusiveMaximum(_NoInit, Trait, metaclass=_ConstType):
     ...
 
 
-class _NoInit:
-    """Subclass this module to restrict initializing an object from the type."""
+# ## Mapping types
 
-    def __new__(cls, *args, **kwargs):
-        raise TypeError(f"Cannot initialize the type : {cls.__name__}")
+
+class Properties(Trait, metaclass=_ContainerType):
+    ...
+
+
+class AdditionalProperties(Trait, metaclass=_ContainerType):
+    ...
+
+
+class Required(Trait, metaclass=_ContainerType):
+    ...
+
+
+class minProperties(Trait, metaclass=_ConstType):
+    ...
+
+
+class mixProperties(Trait, metaclass=_ConstType):
+    ...
+
+
+class PropertyNames(Trait, metaclass=_ConstType):
+    ...
+
+
+class Dependencies(Trait, metaclass=_ConstType):
+    ...
+
+
+class PatternProperties(Trait, metaclass=_ContainerType):
+    ...
+
+
+class _ObjectSchema(_SchemaMeta):
+    ...
+
+
+class _Object(metaclass=_ObjectSchema, type="object"):
+    def __init_subclass__(cls, **kwargs):
+        cls.schema = copy.copy(cls.schema)
+        cls.schema.update(kwargs)
+        cls.schema.update(Properties[cls.__annotations__].schema)
+
+
+class Dict(Trait, dict, _Object):
+    """dict type"""
+
+    __annotations__ = {}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs), type(self).validate(self)
+
+
+class Bunch(munch.Munch, Dict):
+    """Bunch type
+    
+    
+.. Munch Documentation
+    https://pypi.org/project/munch/
+    
+"""
+
+
+class DataClass(Trait, _Object):
+    """Validating dataclass type"""
+
+    def __init_subclass__(cls, **kwargs):
+        cls.schema.update(Properties[cls.__annotations__].schema)
+        dataclasses.dataclass(cls)
+
+    def __post_init__(self):
+        type(self).validate(vars(self))
+
+
+# ## String Type
+
+
+class _StringSchema(_SchemaMeta):
+    """A metaclass schema for strings types.
+    
+    """
+
+    def __mod__(cls, object):
+        return cls + Pattern[object]
+
+    def __gt__(cls, object):
+        return cls + MinLength[object]
+
+    def __lt__(cls, object):
+        return cls + MaxLength[object]
+
+    __rgt__ = __rge__ = __le__ = __lt__
+    __rlt__ = __rle__ = __ge__ = __gt__
+
+
+class String(Trait, str, metaclass=_StringSchema, type="string"):
+    """string type.
+    
+    
+Examples
+--------
+
+    >>> assert isinstance('abc', String)
+    >>> assert isinstance('abc', String%"^a")
+    >>> assert not isinstance('abc', String%"^b")
+    
+    >>> assert isinstance('abc', (2<String)<10) 
+    >>> assert not isinstance('a', (2<String)<10)
+    >>> assert not isinstance('a'*100, (2<String)<10)
+    """
+
+
+class MinLength(Trait, metaclass=_ConstType):
+    ...
+
+
+class MaxLength(Trait, metaclass=_ConstType):
+    ...
+
+
+class ContentMediaType(Trait, metaclass=_ConstType):
+    ...
+
+
+class Pattern(Trait, metaclass=_ConstType):
+    ...
+
+
+# ## Array Type
+
+
+class _ListSchema(_SchemaMeta):
+    def __getitem__(cls, object):
+        return cls + Items[object]
+
+
+class AdditionalItems(Trait, metaclass=_ContainerType):
+    ...
+
+
+class List(Trait, list, metaclass=_ListSchema, type="array"):
+    """List type
+    
+    
+Examples
+--------
+
+List
+
+    >>> assert isinstance([], List)
+    >>> assert not isinstance({}, List)
+    
+Typed list
+
+    >>> assert isinstance([1], List[Integer])
+    >>> assert not isinstance([1.1], List[Integer])
+    
+Tuple        
+    
+    >>> assert isinstance([1, '1'], List[Integer, String])
+    >>> assert not isinstance([1, 2], List[Integer, String])
+    """
+
+
+class Unique(List, uniqueItems=True):
+    """Unique list type
+    
+    
+Examples
+--------
+
+    >>> assert isinstance([1,2], Unique)
+    >>> assert not isinstance([1,1], Unique)
+    
+    """
+
+
+class UniqueItems(_NoTitle, Trait, metaclass=_ConstType):
+    ...
+
+
+class Contains(_NoTitle, Trait, metaclass=_ContainerType):
+    ...
+
+
+class Items(_NoTitle, Trait, metaclass=_ContainerType):
+    ...
+
+
+__import__("doctest").testmod()
+
+
+# ## Combining Schema
 
 
 class Not(Trait, metaclass=_ContainerType):
@@ -443,7 +625,6 @@ Examples
 --------
     
     >>> assert Not[String](100) == 100    
-    >>> with invalid: Not[String]('100')
     
 Note
 ----
@@ -492,19 +673,10 @@ Examples
     """
 
 
-# ## String Type
+# ## String Formats
 
 
-class _StringSchema(_SchemaMeta):
-    """A metaclass schema for strings types.
-    
-    """
-
-    def __mod__(cls, object):
-        return cls + Pattern[object]
-
-
-class String(Trait, str, metaclass=_StringSchema, type="string"):
+class ContentEncoding(Enum["7bit 8bit binary quoted-printable base64".split()]):
     ...
 
 
@@ -516,230 +688,22 @@ class Format(
     ...
 
 
-class MinLength(Trait, metaclass=_ConstType):
+for key in Format.schema.enum:
+    locals()[key.capitalize()] = String + Format[key]
+Regex.compile = re.compile
+del key
+
+
+class If(Trait, metaclass=_ContainerType):
     ...
 
 
-class MaxLength(Trait, metaclass=_ConstType):
+class Then(Trait, metaclass=_ContainerType):
     ...
 
 
-class ContentMediaType(Trait, metaclass=_ConstType):
+class Else(Trait, metaclass=_ContainerType):
     ...
-
-
-class ContentEncoding(Enum["7bit 8bit binary quoted-printable base64".split()]):
-    ...
-
-
-class Pattern(Trait, metaclass=_ConstType):
-    ...
-
-
-# ## Object type
-
-
-class Properties(Trait, metaclass=_ContainerType):
-    ...
-
-
-class AdditionalProperties(Trait, metaclass=_ContainerType):
-    ...
-
-
-class Required(Trait, metaclass=_ContainerType):
-    ...
-
-
-class minProperties(Trait, metaclass=_ConstType):
-    ...
-
-
-class mixProperties(Trait, metaclass=_ConstType):
-    ...
-
-
-class PropertyNames(Trait, metaclass=_ConstType):
-    ...
-
-
-class Dependencies(Trait, metaclass=_ConstType):
-    ...
-
-
-class PatternProperties(Trait, metaclass=_ContainerType):
-    ...
-
-
-class _ObjectSchema(_SchemaMeta):
-    ...
-
-
-class Mapping(metaclass=_ObjectSchema, type="object"):
-    def __init_subclass__(cls, **kwargs):
-        cls.schema = copy.copy(cls.schema)
-        cls.schema.update(kwargs)
-        cls.schema.update(Properties[cls.__annotations__].schema)
-
-
-class Dict(Trait, dict, Mapping):
-    __annotations__ = {}
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs), type(self).validate(self)
-
-
-class Bunch(munch.Munch, Dict):
-    ...
-
-
-class DataClass(Trait, Mapping):
-    def __init_subclass__(cls, **kwargs):
-        cls.schema.update(Properties[cls.__annotations__].schema)
-        dataclasses.dataclass(cls)
-
-    def __post_init__(self):
-        type(self).validate(vars(self))
-
-
-class Configurable(DataClass):
-    config: String
-
-    def __init_subclass__(cls, **kwargs):
-        cls.schema.update(Properties[cls.__annotations__].schema)
-        dataclasses.dataclass(cls)
-
-    def __post_init__(self):
-        type(self).validate(vars(self))
-
-
-class UniqueItems(Trait, metaclass=_ConstType):
-    ...
-
-
-class Contains(Trait, metaclass=_ContainerType):
-    ...
-
-
-class Items(Trait, metaclass=_ContainerType):
-    ...
-
-
-class _ListSchema(_SchemaMeta):
-    ...
-
-
-class AdditionalItems(Trait, metaclass=_ContainerType):
-    ...
-
-
-class TupleSchema(_ListSchema):
-    ...
-
-
-class List(Trait, list, metaclass=_ListSchema, type="array"):
-    ...
-
-
-class Tuple(List):
-    ...
-
-
-class Unique(List, uniqueItems=True):
-    ...
-
-
-class Color(String, format="color"):
-    ...
-
-
-class Datetime(String, format="date-time"):
-    ...
-
-
-class Time(String, format="time"):
-    ...
-
-
-class Date(String, format="date"):
-    ...
-
-
-class Email(String, format="email"):
-    ...
-
-
-class IdnEmail(String, format="idn-email"):
-    ...
-
-
-class Hostname(String, format="hostname"):
-    ...
-
-
-class IdnHostname(String, format="idn-hostname"):
-    ...
-
-
-class Ipv4(String, format="ipv4"):
-    ...
-
-
-class Ipv6(String, format="ipv6"):
-    ...
-
-
-class Uri(String, format="uri"):
-    ...
-
-
-class UriReference(String, format="uri-reference"):
-    ...
-
-
-class Iri(String, format="iri"):
-    ...
-
-
-class IriReference(String, format="iri-reference"):
-    ...
-
-
-class JsonPointer(String, format="json-pointer"):
-    ...
-
-
-class RelativeJsonPointer(String, format="relative-json-pointer"):
-    """
-    https://tools.ietf.org/html/draft-handrews-relative-json-pointer-01"""
-
-
-class Regex(String, format="regex"):
-    def compile(self, flags=0):
-        return re.compile(self, flags)
-
-    # ## Combining Schema
-
-    class Description(Trait, _NoTitle, metaclass=_ConstType):
-        ...
-
-    class Examples(Trait, metaclass=_ConstType):
-        ...
-
-    class Title(Trait, metaclass=_ConstType):
-        ...
-
-    class Const(Trait, metaclass=_ConstType):
-        ...
-
-    class If(Trait, metaclass=_ContainerType):
-        ...
-
-    class Then(Trait, metaclass=_ContainerType):
-        ...
-
-    class Else(Trait, metaclass=_ContainerType):
-        ...
 
 
 if __name__ == "__main__":
