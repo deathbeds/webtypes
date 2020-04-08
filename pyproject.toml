@@ -4,13 +4,15 @@ requires = ["flit_core >=2,<4"]
 build-backend = "flit_core.buildapi"
 
 [tool.flit.metadata]
-module = ""
+module = "wtypes"
 author = "deathbeds"
-author-email = ""
-requires = []
+author-email = "tony.fast@gmail.com"
+requires = [
+    "jsonschema", "munch", "pytest"
+]
 keywords = []
-home-page = ""
-license = ""
+home-page = "https://github.com/deathbeds/wtypes"
+license = "BSD-3-Clause"
 description-file = "readme.md"
 
 
