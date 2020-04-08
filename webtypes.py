@@ -23,20 +23,6 @@
 #    https://json-schema.org/
 # """
 
-import abc
-import copy
-import dataclasses
-import doctest
-import inspect
-import re
-import typing
-
-import jsonschema
-import munch
-import pytest
-
-doctest.testmod(optionflags=doctest.ELLIPSIS)
-
 
 class _NoTitle:
     ...
@@ -46,6 +32,16 @@ class _NoInit:
     ...
 
 
+import abc
+import copy
+import dataclasses
+import inspect
+import re
+import typing
+
+import jsonschema
+import munch
+import pytest
 
 invalid = pytest.raises(jsonschema.ValidationError)
 
@@ -597,6 +593,17 @@ class Bunch(munch.Munch, Dict):
 
 
 class DataClass(Trait, Mapping):
+    def __init_subclass__(cls, **kwargs):
+        cls.schema.update(Properties[cls.__annotations__].schema)
+        dataclasses.dataclass(cls)
+
+    def __post_init__(self):
+        type(self).validate(vars(self))
+
+
+class Configurable(DataClass):
+    config: String
+
     def __init_subclass__(cls, **kwargs):
         cls.schema.update(Properties[cls.__annotations__].schema)
         dataclasses.dataclass(cls)
