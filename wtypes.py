@@ -317,10 +317,14 @@ object
     Return an instance of the object and carry along the schema information.
 """
         args and cls.validate(args[0])
-        if isinstance(cls, _ConstType) or issubclass(cls, Tuple):
+        if dataclasses.is_dataclass(cls):
+            self = super().__new__(cls, *args, **kwargs)
+            cls.validate(vars(self))
+        elif isinstance(cls, _ConstType) or issubclass(cls, Tuple):
             if args:
                 return _object_to_webtype(args[0])(args[0])
-        self = super().__new__(cls, *args, **kwargs)
+        else:
+            self = super().__new__(cls, *args, **kwargs)
         args or cls.validate(self)
         return self
 
@@ -550,20 +554,19 @@ class _Object(metaclass=_ObjectSchema):
         if required:
             cls._schema["required"] = required
 
-    def load(self, *object):
-        self.update(__import__("anyconfig").load(object))
-        type(self).validate(self)
-        return self
+    @classmethod
+    def from_config_file(cls, *object):
+        args = __import__("anyconfig").load(object)
+        return cls(args)
 
 
 class Dict(Trait, dict, _Object):
-    _validated = False
     """dict type
     
 Examples
 --------
 
-    >>> istype(Dict, __import__('collections').abc.MutableMapping)
+    >>> assert istype(Dict, __import__('collections').abc.MutableMapping)
 
     >>> assert isinstance({}, Dict)
     >>> assert not isinstance([], Dict)
@@ -584,6 +587,9 @@ Examples
 .. Object Type
     https://json-schema.org/understanding-json-schema/reference/object.html
     """
+
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls, dict(*args, **kwargs))
 
     def _validate(self):
         type(self).validate(self)
@@ -914,6 +920,11 @@ Examples
     """
 
     _schema = dict(type="array")
+
+    def __new__(cls, *args, **kwargs):
+        if args and isinstance(args[0], tuple):
+            args = (list(args[0]) + list(args[1:]),)
+        return super().__new__(cls, *args, **kwargs)
 
 
 class UniqueItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
