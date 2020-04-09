@@ -651,6 +651,8 @@ class _ListSchema(_SchemaMeta):
     """Meta operations for list types."""
 
     def __getitem__(cls, object):
+        if isinstance(object, tuple):
+            return cls + Items[AnyOf[object]]
         return cls + Items[object]
 
 
@@ -674,7 +676,7 @@ Typed list
 Tuple        
     
     >>> assert isinstance([1, '1'], List[Integer, String])
-    >>> assert not isinstance([1, 2], List[Integer, String])
+    >>> assert not isinstance([1, {}], List[Integer, String])
     """
 
     _schema = dict(type="array")
@@ -691,6 +693,37 @@ Examples
     >>> assert not isinstance([1,1], Unique)
     
     """
+
+
+class _TupleSchema(_SchemaMeta):
+    """Meta operations for list types."""
+
+    def __getitem__(cls, object):
+        if not isinstance(object, tuple):
+            object = (object,)
+        return cls + Items[object]
+
+
+class Tuple(Trait, metaclass=_TupleSchema):
+    """tuple type
+    
+Note
+----
+There are no tuples in json, they are typed lists.
+
+    >>> assert Tuple._schema == List._schema
+    
+    
+Examples
+--------
+
+    >>> assert isinstance([1,2], Tuple)
+    >>> assert isinstance([1,'1'], Tuple[Integer, String])
+    >>> assert not isinstance([1,1], Tuple[Integer, String])
+    
+    """
+
+    _schema = dict(type="array")
 
 
 class UniqueItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
