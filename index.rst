@@ -1,1 +1,3 @@
 .. toctree::
+
+    test_wtypes
