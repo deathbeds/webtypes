@@ -23,6 +23,7 @@ __version__ = "0.0.1"
 import abc
 import copy
 import dataclasses
+import functools
 import inspect
 import re
 import typing
@@ -237,6 +238,8 @@ def _python_to_wtype(object):
             object = Dict
         elif object == int:
             object = Integer
+        elif object == tuple:
+            object = Tuple
         elif object == float:
             object = Float
         elif object == None:
@@ -250,7 +253,7 @@ def _get_schema_from_typeish(object):
     """infer a schema from an object."""
     if isinstance(object, dict):
         return {k: _get_schema_from_typeish(v) for k, v in object.items()}
-    if isinstance(object, tuple):
+    if isinstance(object, (list, tuple)):
         return list(map(_get_schema_from_typeish, object))
     object = _python_to_wtype(object)
     if hasattr(object, "_schema"):
@@ -267,6 +270,9 @@ def _object_to_webtype(object):
         return Dict
     if isinstance(object, str):
         return String
+    if isinstance(object, tuple):
+        return Tuple
+
     if isinstance(object, typing.Sequence):
         return List
     if isinstance(object, bool):
@@ -314,7 +320,9 @@ object
         if isinstance(cls, _ConstType) or issubclass(cls, Tuple):
             if args:
                 return _object_to_webtype(args[0])(args[0])
-        return super().__new__(cls, *args, **kwargs)
+        self = super().__new__(cls, *args, **kwargs)
+        args or cls.validate(self)
+        return self
 
 
 class Description(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
@@ -584,10 +592,26 @@ Examples
         """Only test the key being set to avoid invalid state."""
         properties = self._schema.get("properties", None)
         if key in properties:
-            jsonschema.validate(object, self._schema.get("properties", {}).get(key, {}))
+            jsonschema.validate(
+                object,
+                self._schema.get("properties", {}).get(key, {}),
+                format_checker=jsonschema.draft7_format_checker,
+            )
         else:
-            jsonschema.validate({key: object}, {**self._schema, "required": []})
+            jsonschema.validate(
+                {key: object},
+                {**self._schema, "required": []},
+                format_checker=jsonschema.draft7_format_checker,
+            )
         super().__setitem__(key, object)
+
+    def update(self, *args, **kwargs):
+        jsonschema.validate(
+            dict(*args, **kwargs),
+            {**self._schema, "required": []},
+            format_checker=jsonschema.draft7_format_checker,
+        )
+        super().update(*args, **kwargs)
 
 
 class Bunch(Dict, munch.Munch):
@@ -640,9 +664,17 @@ Examples
             object = object.get(key)
         properties = self._schema.get("properties", None)
         (
-            jsonschema.validate(object, self._schema.get("properties", {}).get(key, {}))
+            jsonschema.validate(
+                object,
+                self._schema.get("properties", {}).get(key, {}),
+                format_checker=jsonschema.draft7_format_checker,
+            )
             if key in properties
-            else jsonschema.validate({key: object}, {**self._schema, "required": []})
+            else jsonschema.validate(
+                {key: object},
+                {**self._schema, "required": []},
+                format_checker=jsonschema.draft7_format_checker,
+            )
         )
         super().__setattr__(key, object)
         # trigger change here.
@@ -747,9 +779,23 @@ class _ListSchema(_SchemaMeta):
     """Meta operations for list types."""
 
     def __getitem__(cls, object):
-        if isinstance(object, tuple):
+        if istype(cls, Tuple) and isinstance(object, (tuple, list)):
+            return cls + Items[list(object)]
+        elif isinstance(object, tuple):
             return cls + Items[AnyOf[object]]
+
         return cls + Items[object]
+
+    def __gt__(cls, object):
+        """Minumum array length"""
+        return cls + MinItems[object]
+
+    def __lt__(cls, object):
+        """Maximum array length"""
+        return cls + MaxItems[object]
+
+    __rgt__ = __rge__ = __le__ = __lt__
+    __rlt__ = __rle__ = __ge__ = __gt__
 
 
 class List(Trait, list, metaclass=_ListSchema):
@@ -770,6 +816,10 @@ Typed list
     >>> assert isinstance([1], List[Integer])
     >>> assert not isinstance([1.1], List[Integer])
     
+    >>> List[Integer, String]._schema.toDict()
+    {'type': 'array', 'items': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}}
+
+    
 Tuple        
     
     >>> assert List[Integer, String]([1, 'abc', 2])
@@ -778,6 +828,52 @@ Tuple
     """
 
     _schema = dict(type="array")
+
+    def _verify_item(self, object, id=None):
+        items = self._schema.get("items", None)
+        if items:
+            if isinstance(items, dict):
+                if isinstance(id, slice):
+                    List[items].validate(object)
+                else:
+                    jsonschema.validate(
+                        object, items, format_checker=jsonschema.draft7_format_checker
+                    )
+            elif isinstance(items, list):
+                if isinstance(id, slice):
+                    # condition for negative slices
+                    Tuple[tuple(items[id])].validate(object)
+                elif isinstance(id, int):
+                    # condition for negative integers
+                    jsonschema.validate(
+                        object,
+                        items[id],
+                        format_checker=jsonschema.draft7_format_checker,
+                    )
+
+    def __setitem__(self, id, object):
+        self._verify_item(object, id)
+        super().__setitem__(id, object)
+
+    def append(self, object):
+        self._verify_item(object, len(self) + 1)
+        super().append(object)
+
+    def insert(self, id, object):
+        self._verify_item(object, id)
+        super().insert(id, object)
+
+    def extend(self, object):
+        id = slice(len(self), len(self) + 3)
+        self._verify_item(object, id)
+        super().extend(object)
+
+    def pop(self, index=-1, default=None):
+        value = super().pop(index, default)
+        try:
+            type(self).validate(self)
+        except ValidationError:
+            self.insert(index, value)
 
 
 class Unique(List, uniqueItems=True):
@@ -794,16 +890,7 @@ Examples
     """
 
 
-class _TupleSchema(_SchemaMeta):
-    """Meta operations for list types."""
-
-    def __getitem__(cls, object):
-        if not isinstance(object, tuple):
-            object = (object,)
-        return cls + Items[object]
-
-
-class Tuple(Trait, metaclass=_TupleSchema):
+class Tuple(List):
     """tuple type
     
 Note
@@ -818,8 +905,11 @@ Examples
 
     >>> assert isinstance([1,2], Tuple)
     >>> assert Tuple[Integer, String]([1, 'abc'])
-    >>> assert isinstance([1,'1'], Tuple[Integer, String])
-    >>> assert not isinstance([1,1], Tuple[Integer, String])
+    >>> Tuple[Integer, String]._schema.toDict()
+    {'type': 'array', 'items': [{'type': 'integer'}, {'type': 'string'}]}
+
+    >>> assert isinstance([1,'1'], Tuple[[Integer, String]])
+    >>> assert not isinstance([1,1], Tuple[[Integer, String]])
     
     """
 
@@ -840,6 +930,14 @@ class Items(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
 
 class AdditionalItems(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
+
+
+class MinItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Minimum length of an array."""
+
+
+class MaxItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Maximum length of an array."""
 
 
 # ## Combining Schema
