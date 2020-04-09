@@ -3,9 +3,6 @@
 
 """extended python types for the web and json
 
-Example
--------
-
 Notes
 -----
 Attributes
@@ -23,8 +20,6 @@ Todo
    https://json-schema.org/
 """
 __version__ = "0.0.1"
-
-
 import abc
 import copy
 import dataclasses
@@ -35,80 +30,43 @@ import typing
 import jsonschema
 import munch
 
-
-class _NoTitle:
-    ...
-
-
-class _NoInit:
-    """Subclass this module to restrict initializing an object from the type."""
-
-    def __new__(cls, *args, **kwargs):
-        raise TypeError(f"Cannot initialize the type : {cls.__name__}")
-
-
 simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes"][
     "enum"
 ]
+ValidationError = jsonschema.ValidationError
 
 
 def istype(object, cls):
-    "is the thing a type"
+    """instance(object, type) and issubclass(object, cls)
+    
+Examples
+--------
+
+    >>> assert istype(int, int)
+    >>> assert not istype(10, int)
+    
+"""
     if isinstance(object, type):
         return issubclass(object, cls)
     return False
 
 
-def get_schema(object):
-    """infer a schema from an object."""
-    if isinstance(object, typing.Hashable):
-        if object == str:
-            object = String
-        elif object == tuple:
-            object = List
-        elif object == list:
-            object = List
-        elif object == dict:
-            object = Dict
-        elif object == int:
-            object = Integer
-        elif object == float:
-            object = Float
-        elif object == None:
-            object = Null
-        elif object == bool:
-            object = Bool
-
-    if hasattr(object, "_schema"):
-        return object._schema
-    return object
+class _NoTitle:
+    """A subclass suppresses the class name when combining schema"""
 
 
-def object_to_webtype(object):
-    if isinstance(object, typing.Mapping):
-        return Dict
-    if isinstance(object, str):
-        return String
-    if isinstance(object, typing.Sequence):
-        return List
-    if isinstance(object, bool):
-        return Bool
-    if isinstance(object, (int, float)):
-        return Float
-    if object == None:
-        return Null
-    return Trait
+class _NoInit:
+    """A subclass to restrict initializing an object from the type."""
 
-
-def _lower_key(str):
-    return str[0].lower() + str[1:]
+    def __new__(cls, *args, **kwargs):
+        raise TypeError(f"Cannot initialize the type : {cls.__name__}")
 
 
 # ## `webtypes` meta schema
 
 
 class _SchemaMeta(abc.ABCMeta):
-    """A metaclass for a constrained type system based on ``jsonschema``.
+    """Meta operations for wtypes.
     
 The ``_SchemaMeta`` ensures that a type's extended schema is validate.
 Types cannot be generated with invalid schema.
@@ -181,28 +139,35 @@ type
         return type(name, (cls,), {"_schema": copy.copy(cls._schema)}, **schema)
 
     def __neg__(cls):
-        return Not[cls._schema]
+        """The Not version of a type."""
+        return Not[cls]
 
     def __pos__(cls):
+        """The type."""
         return cls
 
     def __add__(cls, object):
+        """Add types together"""
         return cls.create(
-            cls.__name__ + ("" if istype(object, _NoTitle) else object.__name__),
-            **get_schema(object),
+            _construct_title(cls) + _construct_title(_python_to_wtype(object)),
+            **_get_schema_from_typeish(object),
         )
 
     def __and__(cls, object):
+        """AllOf the conditions"""
         return AllOf[cls, object]
 
     def __sub__(cls, object):
+        """AnyOf the conditions"""
         return AnyOf[cls, object]
 
     def __or__(cls, object):
+        """OneOf the conditions"""
         return OneOf[cls, object]
 
     def validate(cls, object):
         """Validate an object against type's schema.
+        
         
 Note
 ----
@@ -239,9 +204,12 @@ The bracketed notebook should differeniate actions on types versus those on obje
 """
 
     def __getitem__(cls, object):
+        object = _get_schema_from_typeish(object)
         if isinstance(object, tuple):
             object = list(object)
-        return cls.create(cls.__name__, **{_lower_key(cls.__name__): object})
+        return cls.create(
+            cls.__name__, **{_lower_key(cls.__name__): _get_schema_from_typeish(object)}
+        )
 
 
 class _ContainerType(_ConstType):
@@ -249,16 +217,73 @@ class _ContainerType(_ConstType):
 
     def __getitem__(cls, object):
         schema_key = _lower_key(cls.__name__)
-        if isinstance(object, type):
-            object = get_schema(object)
+        schema = _get_schema_from_typeish(object)
         if isinstance(object, dict):
-            object = {
-                **cls._schema.get(schema_key, {}),
-                **{k: get_schema(v) for k, v in object.items()},
-            }
+            object = {**cls._schema.get(schema_key, {}), **schema}
         if isinstance(object, tuple):
-            object = cls._schema.get(schema_key, []) + list(map(get_schema, object))
-        return cls + Trait.create(schema_key, **{schema_key: object})
+            object = cls._schema.get(schema_key, []) + schema
+        return cls + Trait.create(schema_key, **{schema_key: schema})
+
+
+def _python_to_wtype(object):
+    if isinstance(object, typing.Hashable):
+        if object == str:
+            object = String
+        elif object == tuple:
+            object = List
+        elif object == list:
+            object = List
+        elif object == dict:
+            object = Dict
+        elif object == int:
+            object = Integer
+        elif object == float:
+            object = Float
+        elif object == None:
+            object = Null
+        elif object == bool:
+            object = Bool
+    return object
+
+
+def _get_schema_from_typeish(object):
+    """infer a schema from an object."""
+    if isinstance(object, dict):
+        return {k: _get_schema_from_typeish(v) for k, v in object.items()}
+    if isinstance(object, tuple):
+        return list(map(_get_schema_from_typeish, object))
+    object = _python_to_wtype(object)
+    if hasattr(object, "_schema"):
+        return object._schema
+    return object
+
+
+def _lower_key(str):
+    return str[0].lower() + str[1:]
+
+
+def _object_to_webtype(object):
+    if isinstance(object, typing.Mapping):
+        return Dict
+    if isinstance(object, str):
+        return String
+    if isinstance(object, typing.Sequence):
+        return List
+    if isinstance(object, bool):
+        return Bool
+    if isinstance(object, (int, float)):
+        return Float
+    if object == None:
+        return Null
+    if isinstance(object, Trait):
+        return type(object)
+    return Trait
+
+
+def _construct_title(cls):
+    if istype(cls, _NoTitle):
+        return ""
+    return cls._schema.get("title", cls.__name__)
 
 
 class Trait(metaclass=_SchemaMeta):
@@ -286,11 +311,14 @@ object
     Return an instance of the object and carry along the schema information.
 """
         args and cls.validate(args[0])
-        try:
-            return super().__new__(cls, *args, **kwargs)
-        except:
-            return object_to_webtype(args[0])(args[0]) if args else Trait()
-        return self
+        if isinstance(cls, _ContainerType):
+            if args:
+                return _object_to_webtype(args[0])(args[0])
+        return super().__new__(cls, *args, **kwargs)
+
+
+#             except: return  if args else cls()
+#             return self
 
 
 class Description(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
@@ -344,7 +372,7 @@ Examples
 
 
 class Bool(Trait, metaclass=_SchemaMeta):
-    """Boolean types.
+    """Boolean type
         
 Examples
 --------
@@ -392,15 +420,19 @@ class _NumericSchema(_SchemaMeta):
     """Meta operations for numerical types"""
 
     def __ge__(cls, object):
+        """Inclusive minimum"""
         return cls + Minimum[object]
 
     def __gt__(cls, object):
+        """Exclusive minimum"""
         return cls + ExclusiveMinimum[object]
 
     def __le__(cls, object):
+        """Inclusive maximum"""
         return cls + Maximum[object]
 
     def __lt__(cls, object):
+        """Exclusive maximum"""
         return cls + ExclusiveMaximum[object]
 
     __rgt__ = __lt__
@@ -409,6 +441,7 @@ class _NumericSchema(_SchemaMeta):
     __rle__ = __ge__
 
     def __truediv__(cls, object):
+        """multiple of a number"""
         return cls + MultipleOf[object]
 
 
@@ -508,6 +541,11 @@ class _Object(metaclass=_ObjectSchema):
         cls._schema.update(kwargs)
         cls._schema.update(Properties[cls.__annotations__]._schema)
 
+    def load(self, *object):
+        self.update(__import__("anyconfig").load(object))
+        type(self).validate(self)
+        return self
+
 
 class Dict(Trait, dict, _Object):
     """dict type
@@ -524,19 +562,33 @@ Examples
     >>> assert not isinstance({'a': 'b'}, Dict[Integer, Float])
     >>> assert Dict[Integer]({'a': 1}) == {'a': 1}
     
+
+    >>> Dict[{'a': int}]._schema.toDict()
+    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+    >>> Dict[{'a': int}]({'a': 1})
+    {'a': 1}
+
+    
 .. Object Type
     https://json-schema.org/understanding-json-schema/reference/object.html
     """
 
-    __annotations__ = {}
-
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs), type(self).validate(self)
+        super().__init__(*args, **kwargs)
+        type(self).validate(self)
 
 
-class Bunch(munch.Munch, Dict):
+class Bunch(Dict, munch.Munch):
     """Bunch type
     
+Examples
+--------
+
+    >>> Bunch[{'a': int}]._schema.toDict()
+    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+    >>> Bunch[{'a': int}]({'a': 1}).toDict()
+    {'a': 1}
+
     
 .. Munch Documentation
     https://pypi.org/project/munch/
@@ -545,7 +597,24 @@ class Bunch(munch.Munch, Dict):
 
 
 class DataClass(Trait, _Object):
-    """Validating dataclass type"""
+    """Validating dataclass type
+    
+Examples
+--------
+
+    >>> class q(DataClass): a: int
+    >>> q._schema.toDict()
+    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+
+    >>> q(a=10)
+    q(a=10)
+    
+    """
+
+    def __new__(cls, *args, **kwargs):
+        self = super(Trait, cls).__new__(cls)
+        self.__init__(*args, **kwargs)
+        return self
 
     def __init_subclass__(cls, **kwargs):
         cls._schema.update(Properties[cls.__annotations__]._schema)
@@ -592,12 +661,15 @@ class _StringSchema(_SchemaMeta):
     """
 
     def __mod__(cls, object):
+        """A pattern string type."""
         return cls + Pattern[object]
 
     def __gt__(cls, object):
+        """Minumum string length"""
         return cls + MinLength[object]
 
     def __lt__(cls, object):
+        """Maximum string length"""
         return cls + MaxLength[object]
 
     __rgt__ = __rge__ = __le__ = __lt__
@@ -745,7 +817,7 @@ class AdditionalItems(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
 # ## Combining Schema
 
 
-class Not(Trait, _NoInit, metaclass=_ContainerType):
+class Not(Trait, metaclass=_ContainerType):
     """not schema.
     
 
@@ -757,6 +829,8 @@ Examples
     
 Note
 ----
+See the __neg__ method for symbollic not composition.
+
 .. Not
     https://json-schema.org/understanding-json-schema/reference/combining.html#not
 """
@@ -858,6 +932,13 @@ class Then(Trait, metaclass=_ContainerType):
 
 class Else(Trait, metaclass=_ContainerType):
     ...
+
+
+# ## Configuration classes
+
+
+class Configurable(DataClass):
+    """A configurable classs that is create with dataclass syntax."""
 
 
 if __name__ == "__main__":
