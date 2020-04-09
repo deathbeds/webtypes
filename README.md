@@ -1,7 +1,7 @@
-A pyproject template for toml that has a corresponding setup for development mode.
+A trait-like type system for python using jsonschema. Inspired by a `traitlets`.
 
-https://python-poetry.org/docs/pyproject/
-https://flit.readthedocs.io/en/latest/pyproject_toml.html
-https://snarky.ca/what-the-heck-is-pyproject-toml/
-https://github.com/carlosperate/awesome-pyproject
-https://github.com/dephell/dephell
+`wtypes` is an extended type system for python that uses `jsonschema` to provide extra type checking.
+
+* [Documentation](https://wtypes.readthedocs.io/)
+* [Pypi]()
+* [Tests](https://github.com/deathbeds/wtypes/actions)
