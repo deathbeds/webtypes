@@ -549,10 +549,13 @@ class _Object(metaclass=_ObjectSchema):
 
 
 class Dict(Trait, dict, _Object):
+    _validated = False
     """dict type
     
 Examples
 --------
+
+    >>> istype(Dict, __import__('collections').abc.MutableMapping)
 
     >>> assert isinstance({}, Dict)
     >>> assert not isinstance([], Dict)
@@ -574,9 +577,17 @@ Examples
     https://json-schema.org/understanding-json-schema/reference/object.html
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def _validate(self):
         type(self).validate(self)
+
+    def __setitem__(self, key, object):
+        """Only test the key being set to avoid invalid state."""
+        properties = self._schema.get("properties", None)
+        if key in properties:
+            jsonschema.validate(object, self._schema.get("properties", {}).get(key, {}))
+        else:
+            jsonschema.validate({key: object}, {**self._schema, "required": []})
+        super().__setitem__(key, object)
 
 
 class Bunch(Dict, munch.Munch):
@@ -623,8 +634,18 @@ Examples
         super().__init_subclass__()
         dataclasses.dataclass(cls)
 
-    def __post_init__(self):
-        type(self).validate(vars(self))
+    def __setattr__(self, key, object):
+        """Only test the attribute being set to avoid invalid state."""
+        if isinstance(object, dict):
+            object = object.get(key)
+        properties = self._schema.get("properties", None)
+        (
+            jsonschema.validate(object, self._schema.get("properties", {}).get(key, {}))
+            if key in properties
+            else jsonschema.validate({key: object}, {**self._schema, "required": []})
+        )
+        super().__setattr__(key, object)
+        # trigger change here.
 
 
 class AdditionalProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
