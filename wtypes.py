@@ -316,6 +316,18 @@ Returns
 object
     Return an instance of the object and carry along the schema information.
 """
+        if not args and not kwargs:
+            default = cls._schema.get("default", None)
+            if default is not None:
+                args = (default,)
+            elif "properties" in cls._schema:
+                args = (
+                    {
+                        k: v["default"]
+                        for k, v in cls._schema["properties"]
+                        if "default" in v
+                    },
+                )
         args and cls.validate(args[0])
         if dataclasses.is_dataclass(cls):
             self = super().__new__(cls, *args, **kwargs)
@@ -325,6 +337,7 @@ object
                 return _object_to_webtype(args[0])(args[0])
         else:
             self = super().__new__(cls, *args, **kwargs)
+            self.__init__(*args, **kwargs)
         args or cls.validate(self)
         return self
 
@@ -344,6 +357,10 @@ Examples
 
 
 class Examples(_NoInit, Trait, metaclass=_ConstType):
+    """"""
+
+
+class Default(_NoInit, Trait, metaclass=_ConstType):
     """"""
 
 
@@ -457,7 +474,9 @@ class Integer(Trait, int, metaclass=_NumericSchema):
     """integer type
     
     
->>> assert isinstance(10, Float)
+    >>> assert isinstance(10, Integer)
+    >>> (Integer+Default[9])(9)
+    9
 
 Symbollic conditions.
 
@@ -550,7 +569,10 @@ class _Object(metaclass=_ObjectSchema):
         cls._schema.update(Properties[cls.__annotations__]._schema)
         required = []
         for key in cls.__annotations__:
-            hasattr(cls, key) or required.append(key)
+            if hasattr(cls, key):
+                cls._schema.properties[key].default = getattr(cls, key)
+            else:
+                required.append(key)
         if required:
             cls._schema["required"] = required
 
@@ -719,7 +741,6 @@ class PatternProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
 
 class _StringSchema(_SchemaMeta):
     """Meta operations for strings types.
-    
     """
 
     def __mod__(cls, object):
@@ -789,7 +810,6 @@ class _ListSchema(_SchemaMeta):
             return cls + Items[list(object)]
         elif isinstance(object, tuple):
             return cls + Items[AnyOf[object]]
-
         return cls + Items[object]
 
     def __gt__(cls, object):
@@ -834,6 +854,11 @@ Tuple
     """
 
     _schema = dict(type="array")
+
+    def __new__(cls, *args, **kwargs):
+        if args and isinstance(args[0], tuple):
+            args = (list(args[0]) + list(args[1:]),)
+        return super().__new__(cls, *args, **kwargs)
 
     def _verify_item(self, object, id=None):
         items = self._schema.get("items", None)
@@ -918,13 +943,6 @@ Examples
     >>> assert not isinstance([1,1], Tuple[[Integer, String]])
     
     """
-
-    _schema = dict(type="array")
-
-    def __new__(cls, *args, **kwargs):
-        if args and isinstance(args[0], tuple):
-            args = (list(args[0]) + list(args[1:]),)
-        return super().__new__(cls, *args, **kwargs)
 
 
 class UniqueItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
