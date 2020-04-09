@@ -311,14 +311,10 @@ object
     Return an instance of the object and carry along the schema information.
 """
         args and cls.validate(args[0])
-        if isinstance(cls, _ContainerType):
+        if isinstance(cls, _ConstType) or issubclass(cls, Tuple):
             if args:
                 return _object_to_webtype(args[0])(args[0])
         return super().__new__(cls, *args, **kwargs)
-
-
-#             except: return  if args else cls()
-#             return self
 
 
 class Description(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
@@ -540,6 +536,11 @@ class _Object(metaclass=_ObjectSchema):
         cls._schema = copy.copy(cls._schema)
         cls._schema.update(kwargs)
         cls._schema.update(Properties[cls.__annotations__]._schema)
+        required = []
+        for key in cls.__annotations__:
+            hasattr(cls, key) or required.append(key)
+        if required:
+            cls._schema["required"] = required
 
     def load(self, *object):
         self.update(__import__("anyconfig").load(object))
@@ -604,10 +605,12 @@ Examples
 
     >>> class q(DataClass): a: int
     >>> q._schema.toDict()
-    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+    {'type': 'object', 'properties': {'a': {'type': 'integer'}}, 'required': ['a']}
 
     >>> q(a=10)
     q(a=10)
+    
+    >>> assert not isinstance({}, q)
     
     """
 
@@ -617,7 +620,7 @@ Examples
         return self
 
     def __init_subclass__(cls, **kwargs):
-        cls._schema.update(Properties[cls.__annotations__]._schema)
+        super().__init_subclass__()
         dataclasses.dataclass(cls)
 
     def __post_init__(self):
@@ -742,11 +745,13 @@ List
     
 Typed list
 
+    >>> assert List[Integer]([1, 2, 3])
     >>> assert isinstance([1], List[Integer])
     >>> assert not isinstance([1.1], List[Integer])
     
 Tuple        
     
+    >>> assert List[Integer, String]([1, 'abc', 2])
     >>> assert isinstance([1, '1'], List[Integer, String])
     >>> assert not isinstance([1, {}], List[Integer, String])
     """
@@ -761,6 +766,7 @@ class Unique(List, uniqueItems=True):
 Examples
 --------
 
+    >>> assert Unique(list('abc'))
     >>> assert isinstance([1,2], Unique)
     >>> assert not isinstance([1,1], Unique)
     
@@ -790,6 +796,7 @@ Examples
 --------
 
     >>> assert isinstance([1,2], Tuple)
+    >>> assert Tuple[Integer, String]([1, 'abc'])
     >>> assert isinstance([1,'1'], Tuple[Integer, String])
     >>> assert not isinstance([1,1], Tuple[Integer, String])
     
@@ -842,6 +849,7 @@ class AnyOf(Trait, _NoInit, metaclass=_ContainerType):
 Examples
 --------
 
+    >>> assert AnyOf[Integer, String]('abc')
     >>> assert isinstance(10, AnyOf[Integer, String])
     >>> assert not isinstance([], AnyOf[Integer, String])
     
@@ -856,6 +864,7 @@ class AllOf(Trait, _NoInit, metaclass=_ContainerType):
 Examples
 --------
 
+    >>> assert AllOf[Float>0, Integer/3](9)
     >>> assert isinstance(9, AllOf[Float>0, Integer/3])
     >>> assert not isinstance(-9, AllOf[Float>0, Integer/3])
     
@@ -870,6 +879,7 @@ class OneOf(Trait, _NoInit, metaclass=_ContainerType):
 Examples
 --------
 
+    >>> assert OneOf[Float>0, Integer/3](-9)
     >>> assert isinstance(-9, OneOf[Float>0, Integer/3])
     >>> assert not isinstance(9, OneOf[Float>0, Integer/3])
 
@@ -879,13 +889,14 @@ Examples
 """
 
 
-class Enum(Trait, _NoInit, metaclass=_ConstType):
+class Enum(Trait, metaclass=_ConstType):
     """An enumerate type that is restricted to its inputs.
     
     
 Examples
 --------
 
+    >>> assert Enum['cat', 'dog']('cat')
     >>> assert isinstance('cat', Enum['cat', 'dog'])
     >>> assert not isinstance('🐢', Enum['cat', 'dog'])
 
@@ -918,16 +929,20 @@ Regex.compile = re.compile
 del key
 
 
-class If(Trait, metaclass=_ContainerType):
-    ...
+class If(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """if condition type
+    
+.. Conditions:
+    https://json-schema.org/understanding-json-schema/reference/conditionals.html
+    """
 
 
-class Then(Trait, metaclass=_ContainerType):
-    ...
+class Then(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """then condition type"""
 
 
-class Else(Trait, metaclass=_ContainerType):
-    ...
+class Else(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """else condition type"""
 
 
 # ## Configuration classes
@@ -955,7 +970,4 @@ if __name__ == "__main__":
         get_ipython().system("coverage html")
         with IPython.utils.capture.capture_output():
             get_ipython().system("pyreverse wtypes -osvg -pwtypes")
-        IPython.display.display(IPython.display.SVG("classes_wtypes.svg"))
-        with IPython.utils.capture.capture_output():
-            get_ipython().system("pyreverse wtypes -osvg -pwtypes -my -s1")
         IPython.display.display(IPython.display.SVG("classes_wtypes.svg"))
