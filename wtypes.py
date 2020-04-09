@@ -61,6 +61,24 @@ def istype(object, cls):
 
 def get_schema(object):
     """infer a schema from an object."""
+    if isinstance(object, typing.Hashable):
+        if object == str:
+            object = String
+        elif object == tuple:
+            object = List
+        elif object == list:
+            object = List
+        elif object == dict:
+            object = Dict
+        elif object == int:
+            object = Integer
+        elif object == float:
+            object = Float
+        elif object == None:
+            object = Null
+        elif object == bool:
+            object = Bool
+
     if hasattr(object, "schema"):
         return object.schema
     return object
@@ -279,20 +297,51 @@ object
         return self
 
 
-class Description(Trait, _NoTitle, metaclass=_ConstType):
-    ...
+class Description(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
+    """An empty type with a description
+    
+    
+Examples
+--------
+
+    >>> yo = Description['yo']
+    >>> yo.schema.toDict()
+    {'description': 'yo'}
+
+    """
 
 
-class Examples(Trait, metaclass=_ConstType):
-    ...
+class Examples(_NoInit, Trait, metaclass=_ConstType):
+    """"""
 
 
-class Title(Trait, metaclass=_ConstType):
-    ...
+class Title(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
+    """An empty type with a title
+    
+    
+Examples
+--------
+
+    >>> holla = Title['holla']
+    >>> holla.schema.toDict()
+    {'title': 'holla'}
+    """
 
 
-class Const(Trait, metaclass=_ConstType):
-    ...
+class Const(_NoInit, Trait, metaclass=_ConstType):
+    """A constant
+    
+Examples
+--------
+
+    >>> Const[10].schema.toDict()
+    {'const': 10}
+    
+    
+    >>> assert isinstance('thing', Const['thing'])
+    >>> assert not isinstance('jawn', Const['thing']), "Because the compiler is from Philly."
+    
+"""
 
 
 # ## Logical Types
@@ -327,6 +376,9 @@ Examples
 
     >>> Null(None)
     
+.. Null Type:
+    https://json-schema.org/understanding-json-schema/reference/null.html
+
     
 """
 
@@ -338,6 +390,8 @@ Examples
 
 
 class _NumericSchema(_SchemaMeta):
+    """Meta operations for numerical types"""
+
     def __ge__(cls, object):
         return cls + Minimum[object]
 
@@ -365,17 +419,21 @@ class Integer(Trait, int, metaclass=_NumericSchema, type="integer"):
     
 >>> assert isinstance(10, Float)
 
->>> bounded = (10< Float)< 100
->>> bounded.schema.toDict()
-{'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
- 
->>> assert isinstance(12, bounded)
->>> assert not isinstance(0, bounded)
+Symbollic conditions.
 
->>> assert (Integer+MultipleOf[3])(9) == 9
+    >>> bounded = (10< Float)< 100
+    >>> bounded.schema.toDict()
+    {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+
+    >>> assert isinstance(12, bounded)
+    >>> assert not isinstance(0, bounded)
+
+Multiples
+
+    >>> assert (Integer+MultipleOf[3])(9) == 9
 
 
-.. Numeric Types
+.. Numeric Types:
     https://json-schema.org/understanding-json-schema/reference/numeric.html
     
     """
@@ -385,81 +443,61 @@ class Float(Trait, float, metaclass=_NumericSchema, type="number"):
     """float type
     
     
->>> assert isinstance(10, Integer)
->>> assert not isinstance(10.1, Integer)
+    >>> assert isinstance(10, Integer)
+    >>> assert not isinstance(10.1, Integer)
 
->>> bounded = (10< Integer)< 100
->>> bounded.schema.toDict()
-{'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
- 
->>> assert isinstance(12, bounded)
->>> assert not isinstance(0, bounded)
+    >>> bounded = (10< Integer)< 100
+    >>> bounded.schema.toDict()
+    {'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
->>> assert (Integer/3)(9) == 9
+    >>> assert isinstance(12, bounded)
+    >>> assert not isinstance(0, bounded)
+    >>> assert (Integer/3)(9) == 9
     
     """
 
 
 class MultipleOf(_NoInit, Trait, metaclass=_ConstType):
-    ...
+    """A multipleof constraint for numeric types."""
 
 
 class Minimum(_NoInit, Trait, metaclass=_ConstType):
-    ...
+    """A minimum constraint for numeric types."""
 
 
 class ExclusiveMinimum(_NoInit, Trait, metaclass=_ConstType):
-    ...
+    """A exclusive minimum constraint for numeric types."""
 
 
 class Maximum(_NoInit, Trait, metaclass=_ConstType):
-    ...
+    """A exclusive maximum constraint for numeric types."""
 
 
 class ExclusiveMaximum(_NoInit, Trait, metaclass=_ConstType):
-    ...
+    """A exclusive maximum constraint for numeric types."""
 
 
 # ## Mapping types
 
 
-class Properties(Trait, metaclass=_ContainerType):
-    ...
-
-
-class AdditionalProperties(Trait, metaclass=_ContainerType):
-    ...
-
-
-class Required(Trait, metaclass=_ContainerType):
-    ...
-
-
-class minProperties(Trait, metaclass=_ConstType):
-    ...
-
-
-class mixProperties(Trait, metaclass=_ConstType):
-    ...
-
-
-class PropertyNames(Trait, metaclass=_ConstType):
-    ...
-
-
-class Dependencies(Trait, metaclass=_ConstType):
-    ...
-
-
-class PatternProperties(Trait, metaclass=_ContainerType):
-    ...
+class Properties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """Object properties."""
 
 
 class _ObjectSchema(_SchemaMeta):
-    ...
+    """Meta operations for the object schema."""
+
+    def __getitem__(cls, object):
+        if isinstance(object, dict):
+            return cls + Properties[object]
+        if not isinstance(object, tuple):
+            object = (object,)
+        return cls + AdditionalProperties[AnyOf[object]]
 
 
 class _Object(metaclass=_ObjectSchema, type="object"):
+    """Base class for validating object types."""
+
     def __init_subclass__(cls, **kwargs):
         cls.schema = copy.copy(cls.schema)
         cls.schema.update(kwargs)
@@ -467,7 +505,23 @@ class _Object(metaclass=_ObjectSchema, type="object"):
 
 
 class Dict(Trait, dict, _Object):
-    """dict type"""
+    """dict type
+    
+Examples
+--------
+
+    >>> assert isinstance({}, Dict)
+    >>> assert not isinstance([], Dict)
+    
+    >>> assert isinstance({'a': 1}, Dict + Required['a',])
+    >>> assert not isinstance({}, Dict + Required['a',])
+
+    >>> assert not isinstance({'a': 'b'}, Dict[Integer, Float])
+    >>> assert Dict[Integer]({'a': 1}) == {'a': 1}
+    
+.. Object Type
+    https://json-schema.org/understanding-json-schema/reference/object.html
+    """
 
     __annotations__ = {}
 
@@ -496,11 +550,39 @@ class DataClass(Trait, _Object):
         type(self).validate(vars(self))
 
 
+class AdditionalProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """Additional object properties."""
+
+
+class Required(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """Required properties."""
+
+
+class minProperties(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Minimum number of properties."""
+
+
+class maxProperties(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Maximum number of properties."""
+
+
+class PropertyNames(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Propery name constraints."""
+
+
+class Dependencies(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Properties dependencies."""
+
+
+class PatternProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """Pattern properties names."""
+
+
 # ## String Type
 
 
 class _StringSchema(_SchemaMeta):
-    """A metaclass schema for strings types.
+    """Meta operations for strings types.
     
     """
 
@@ -525,8 +607,13 @@ Examples
 --------
 
     >>> assert isinstance('abc', String)
+    
+String patterns
+
     >>> assert isinstance('abc', String%"^a")
     >>> assert not isinstance('abc', String%"^b")
+    
+String constraints
     
     >>> assert isinstance('abc', (2<String)<10) 
     >>> assert not isinstance('a', (2<String)<10)
@@ -534,32 +621,30 @@ Examples
     """
 
 
-class MinLength(Trait, metaclass=_ConstType):
-    ...
+class MinLength(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Minimum length of a string type."""
 
 
-class MaxLength(Trait, metaclass=_ConstType):
-    ...
+class MaxLength(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Maximum length of a string type."""
 
 
-class ContentMediaType(Trait, metaclass=_ConstType):
-    ...
+class ContentMediaType(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Content type of a string."""
 
 
-class Pattern(Trait, metaclass=_ConstType):
-    ...
+class Pattern(Trait, _NoInit, metaclass=_ConstType):
+    """A regular expression pattern."""
 
 
 # ## Array Type
 
 
 class _ListSchema(_SchemaMeta):
+    """Meta operations for list types."""
+
     def __getitem__(cls, object):
         return cls + Items[object]
-
-
-class AdditionalItems(Trait, metaclass=_ContainerType):
-    ...
 
 
 class List(Trait, list, metaclass=_ListSchema, type="array"):
@@ -599,19 +684,20 @@ Examples
     """
 
 
-class UniqueItems(_NoTitle, Trait, metaclass=_ConstType):
+class UniqueItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Schema for unique items in a list."""
+
+
+class Contains(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
 
 
-class Contains(_NoTitle, Trait, metaclass=_ContainerType):
+class Items(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
 
 
-class Items(_NoTitle, Trait, metaclass=_ContainerType):
+class AdditionalItems(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
-
-
-__import__("doctest").testmod()
 
 
 # ## Combining Schema
@@ -624,7 +710,8 @@ class Not(Trait, metaclass=_ContainerType):
 Examples
 --------
     
-    >>> assert Not[String](100) == 100    
+    >>> assert Not[String](100) == 100   
+    >>> assert not isinstance('abc', Not[String])
     
 Note
 ----
@@ -639,7 +726,8 @@ class AnyOf(_NoInit, Trait, metaclass=_ContainerType):
 Examples
 --------
 
-    > AnyOf[Integer, String]
+    >>> assert isinstance(10, AnyOf[Integer, String])
+    >>> assert not isinstance([], AnyOf[Integer, String])
     
 .. anyOf
     https://json-schema.org/understanding-json-schema/reference/combining.html#anyof
@@ -649,6 +737,12 @@ Examples
 class AllOf(_NoInit, Trait, metaclass=_ContainerType):
     """allOf combined schema.
     
+Examples
+--------
+
+    >>> assert isinstance(9, AllOf[Float>0, Integer/3])
+    >>> assert not isinstance(-9, AllOf[Float>0, Integer/3])
+    
 .. allOf
     https://json-schema.org/understanding-json-schema/reference/combining.html#allof
 """
@@ -656,6 +750,13 @@ class AllOf(_NoInit, Trait, metaclass=_ContainerType):
 
 class OneOf(_NoInit, Trait, metaclass=_ContainerType):
     """oneOf combined schema.
+
+Examples
+--------
+
+    >>> assert isinstance(-9, OneOf[Float>0, Integer/3])
+    >>> assert not isinstance(9, OneOf[Float>0, Integer/3])
+
     
 .. oneOf
     https://json-schema.org/understanding-json-schema/reference/combining.html#oneof
@@ -669,21 +770,35 @@ class Enum(Trait, metaclass=_ConstType):
 Examples
 --------
 
+    >>> assert isinstance('cat', Enum['cat', 'dog'])
+    >>> assert not isinstance('🐢', Enum['cat', 'dog'])
+
     
     """
+
+
+__import__("doctest").testmod()
 
 
 # ## String Formats
 
 
-class ContentEncoding(Enum["7bit 8bit binary quoted-printable base64".split()]):
-    ...
+class ContentEncoding(
+    Enum["7bit 8bit binary quoted-printable base64".split()], _NoInit, _NoTitle
+):
+    """Content encodings for a string.
+    
+.. Json schema media:
+    https://json-schema.org/understanding-json-schema/reference/non_json_data.html
+"""
 
 
 class Format(
     Enum[
         "color date-time time date email idn-email hostname idn-hostname ipv4 ipv6 uri uri-reference iri iri-reference uri-template json-pointer relative-json-pointer regex".split()
-    ]
+    ],
+    _NoInit,
+    _NoTitle,
 ):
     ...
 
