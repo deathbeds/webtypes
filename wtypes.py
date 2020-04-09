@@ -895,6 +895,8 @@ Examples
 
 # ## String Formats
 
+_formats = "color date-time time date email idn-email hostname idn-hostname ipv4 ipv6 uri uri-reference iri iri-reference uri-template json-pointer relative-json-pointer regex".split()
+
 
 class ContentEncoding(
     Enum["7bit 8bit binary quoted-printable base64".split()], _NoInit, _NoTitle
@@ -906,13 +908,7 @@ class ContentEncoding(
 """
 
 
-class Format(
-    Enum[
-        "color date-time time date email idn-email hostname idn-hostname ipv4 ipv6 uri uri-reference iri iri-reference uri-template json-pointer relative-json-pointer regex".split()
-    ],
-    _NoInit,
-    _NoTitle,
-):
+class Format(Enum[_formats], _NoInit, _NoTitle):
     ...
 
 
