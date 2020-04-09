@@ -79,8 +79,8 @@ def get_schema(object):
         elif object == bool:
             object = Bool
 
-    if hasattr(object, "schema"):
-        return object.schema
+    if hasattr(object, "_schema"):
+        return object._schema
     return object
 
 
@@ -115,33 +115,20 @@ Types cannot be generated with invalid schema.
 
 Attributes
 ----------
-meta_schema : dict
+_meta_schema : dict
     The schema the type system validates against.
-"""
-
-    meta_schema = jsonschema.Draft7Validator.META_SCHEMA
-
-    @classmethod
-    def new_meta_schema(cls, meta_schema, title=None):
-        """create a new type schema for a specific meta_schema.
-        
-Parameters
-----------
-metaschema: str
-    The title of the new type/schema.
-title: dict, optional
-    The name of the new type.
     
-Returns
--------
-type
+_schema : dict
+    The schema the object validates against.
 
-Raises
-------
-jsonschema.ValidationError
-    The ``jsonschema`` module validation throws an exception when a schema is invalid,
+_type
+    The resource type.
+
 """
-        return type(name or meta_schema.get("title"), (Dict,), {}, **meta_schema)
+
+    _meta_schema = jsonschema.Draft7Validator.META_SCHEMA
+    _schema = None
+    _type = "http://json-schema.org/draft-07/schema#/properties/"
 
     def _merge_annotations(cls):
         """Merge annotations from the module resolution order."""
@@ -154,21 +141,24 @@ jsonschema.ValidationError
         """Merge schema from the module resolution order."""
         schema = munch.Munch()
         for self in reversed(cls.__mro__):
-            schema.update(munch.Munch.fromDict(getattr(self, "schema", {}) or {}))
-        cls.schema = schema
+            schema.update(munch.Munch.fromDict(getattr(self, "_schema", {}) or {}))
+        cls._schema = schema
 
     def __new__(cls, name, base, kwargs, **schema):
         global simpleTypes
-        if "type" in schema and schema["type"] not in simpleTypes:
-            ...
-        cls = super().__new__(cls, name, base, kwargs)
 
+        cls = super().__new__(cls, name, base, kwargs)
+        cls._type = schema.pop("type", None) or cls._type
         # Combine metadata across the module resolution order.
         cls._merge_annotations(), cls._merge_schema()
-        cls.schema.update(schema)
+        if schema.get("type", "null") not in simpleTypes:
+            cls._type = schema.pop("type")
+        cls._schema.update(schema)
 
         jsonschema.validate(
-            cls.schema, cls.meta_schema, format_checker=jsonschema.draft7_format_checker
+            cls._schema,
+            cls._meta_schema,
+            format_checker=jsonschema.draft7_format_checker,
         )
         """Validate the proposed schema against the jsonschema schema."""
         return cls
@@ -188,10 +178,10 @@ Returns
 type
     
         """
-        return type(name, (cls,), {}, **schema)
+        return type(name, (cls,), {"_schema": copy.copy(cls._schema)}, **schema)
 
     def __neg__(cls):
-        return Not[cls.schema]
+        return Not[cls._schema]
 
     def __pos__(cls):
         return cls
@@ -230,7 +220,7 @@ jsonschema.ValidationError
     otherwise the returns a None type.
 """
         jsonschema.validate(
-            object, cls.schema, format_checker=jsonschema.draft7_format_checker
+            object, cls._schema, format_checker=jsonschema.draft7_format_checker
         )
 
     def __instancecheck__(cls, object):
@@ -263,19 +253,25 @@ class _ContainerType(_ConstType):
             object = get_schema(object)
         if isinstance(object, dict):
             object = {
-                **cls.schema.get(schema_key, {}),
+                **cls._schema.get(schema_key, {}),
                 **{k: get_schema(v) for k, v in object.items()},
             }
         if isinstance(object, tuple):
-            object = cls.schema.get(schema_key, []) + list(map(get_schema, object))
+            object = cls._schema.get(schema_key, []) + list(map(get_schema, object))
         return cls + Trait.create(schema_key, **{schema_key: object})
 
 
 class Trait(metaclass=_SchemaMeta):
-    """A trait is an object validated by a validate ``jsonschema``."""
+    """A trait is an object validated by a validate ``jsonschema``.
+    """
+
+    _schema = None
+    _type = "http://www.w3.org/2000/01/rdf-schema#Resource"
 
     def __new__(cls, *args, **kwargs):
         """__new__ validates an object against the type schema and dispatches different values in return.
+        
+        
         
 Parameters
 ----------
@@ -305,7 +301,7 @@ Examples
 --------
 
     >>> yo = Description['yo']
-    >>> yo.schema.toDict()
+    >>> yo._schema.toDict()
     {'description': 'yo'}
 
     """
@@ -323,7 +319,7 @@ Examples
 --------
 
     >>> holla = Title['holla']
-    >>> holla.schema.toDict()
+    >>> holla._schema.toDict()
     {'title': 'holla'}
     """
 
@@ -334,7 +330,7 @@ class Const(_NoInit, Trait, metaclass=_ConstType):
 Examples
 --------
 
-    >>> Const[10].schema.toDict()
+    >>> Const[10]._schema.toDict()
     {'const': 10}
     
     
@@ -347,7 +343,7 @@ Examples
 # ## Logical Types
 
 
-class Bool(metaclass=_SchemaMeta, type="boolean"):
+class Bool(metaclass=_SchemaMeta):
     """Boolean types.
         
 Examples
@@ -362,13 +358,15 @@ It is not possible to base class ``bool`` so object creation is customized.
     
 """
 
+    _schema = dict(type="boolean")
+
     def __new__(cls, *args):
         args = args or (bool(),)
         args and cls.validate(args[0])
         return args[0]
 
 
-class Null(metaclass=_SchemaMeta, type="null"):
+class Null(metaclass=_SchemaMeta):
     """nil, none, null type
         
 Examples
@@ -378,9 +376,10 @@ Examples
     
 .. Null Type:
     https://json-schema.org/understanding-json-schema/reference/null.html
-
     
 """
+
+    _schema = dict(type="null")
 
     def __new__(cls, *args):
         args and cls.validate(args[0])
@@ -413,7 +412,7 @@ class _NumericSchema(_SchemaMeta):
         return cls + MultipleOf[object]
 
 
-class Integer(Trait, int, metaclass=_NumericSchema, type="integer"):
+class Integer(Trait, int, metaclass=_NumericSchema):
     """integer type
     
     
@@ -422,7 +421,7 @@ class Integer(Trait, int, metaclass=_NumericSchema, type="integer"):
 Symbollic conditions.
 
     >>> bounded = (10< Float)< 100
-    >>> bounded.schema.toDict()
+    >>> bounded._schema.toDict()
     {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
     >>> assert isinstance(12, bounded)
@@ -438,23 +437,27 @@ Multiples
     
     """
 
+    _schema = dict(type="integer")
 
-class Float(Trait, float, metaclass=_NumericSchema, type="number"):
+
+class Float(Trait, float, metaclass=_NumericSchema):
     """float type
     
     
     >>> assert isinstance(10, Integer)
     >>> assert not isinstance(10.1, Integer)
 
-    >>> bounded = (10< Integer)< 100
-    >>> bounded.schema.toDict()
-    {'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+    >>> bounded = (10< Float)< 100
+    >>> bounded._schema.toDict()
+    {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
     >>> assert isinstance(12, bounded)
     >>> assert not isinstance(0, bounded)
     >>> assert (Integer/3)(9) == 9
     
     """
+
+    _schema = dict(type="number")
 
 
 class MultipleOf(_NoInit, Trait, metaclass=_ConstType):
@@ -495,13 +498,15 @@ class _ObjectSchema(_SchemaMeta):
         return cls + AdditionalProperties[AnyOf[object]]
 
 
-class _Object(metaclass=_ObjectSchema, type="object"):
+class _Object(metaclass=_ObjectSchema):
     """Base class for validating object types."""
 
+    _schema = dict(type="object")
+
     def __init_subclass__(cls, **kwargs):
-        cls.schema = copy.copy(cls.schema)
-        cls.schema.update(kwargs)
-        cls.schema.update(Properties[cls.__annotations__].schema)
+        cls._schema = copy.copy(cls._schema)
+        cls._schema.update(kwargs)
+        cls._schema.update(Properties[cls.__annotations__]._schema)
 
 
 class Dict(Trait, dict, _Object):
@@ -543,7 +548,7 @@ class DataClass(Trait, _Object):
     """Validating dataclass type"""
 
     def __init_subclass__(cls, **kwargs):
-        cls.schema.update(Properties[cls.__annotations__].schema)
+        cls._schema.update(Properties[cls.__annotations__]._schema)
         dataclasses.dataclass(cls)
 
     def __post_init__(self):
@@ -599,7 +604,7 @@ class _StringSchema(_SchemaMeta):
     __rlt__ = __rle__ = __ge__ = __gt__
 
 
-class String(Trait, str, metaclass=_StringSchema, type="string"):
+class String(Trait, str, metaclass=_StringSchema):
     """string type.
     
     
@@ -619,6 +624,8 @@ String constraints
     >>> assert not isinstance('a', (2<String)<10)
     >>> assert not isinstance('a'*100, (2<String)<10)
     """
+
+    _schema = dict(type="string")
 
 
 class MinLength(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
@@ -647,7 +654,7 @@ class _ListSchema(_SchemaMeta):
         return cls + Items[object]
 
 
-class List(Trait, list, metaclass=_ListSchema, type="array"):
+class List(Trait, list, metaclass=_ListSchema):
     """List type
     
     
@@ -669,6 +676,8 @@ Tuple
     >>> assert isinstance([1, '1'], List[Integer, String])
     >>> assert not isinstance([1, 2], List[Integer, String])
     """
+
+    _schema = dict(type="array")
 
 
 class Unique(List, uniqueItems=True):
@@ -777,9 +786,6 @@ Examples
     """
 
 
-__import__("doctest").testmod()
-
-
 # ## String Formats
 
 
@@ -803,7 +809,7 @@ class Format(
     ...
 
 
-for key in Format.schema.enum:
+for key in Format._schema.enum:
     locals()[key.capitalize()] = String + Format[key]
 Regex.compile = re.compile
 del key
