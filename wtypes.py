@@ -953,6 +953,8 @@ class Configurable(DataClass):
 
 
 if __name__ == "__main__":
+    from IPython import get_ipython
+
     if "__file__" in locals():
         if "covtest" in __import__("sys").argv:
             print(__import__("doctest").testmod(optionflags=8))
