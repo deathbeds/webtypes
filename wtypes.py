@@ -343,7 +343,7 @@ Examples
 # ## Logical Types
 
 
-class Bool(metaclass=_SchemaMeta):
+class Bool(Trait, metaclass=_SchemaMeta):
     """Boolean types.
         
 Examples
@@ -366,7 +366,7 @@ It is not possible to base class ``bool`` so object creation is customized.
         return args[0]
 
 
-class Null(metaclass=_SchemaMeta):
+class Null(Trait, metaclass=_SchemaMeta):
     """nil, none, null type
         
 Examples
@@ -712,7 +712,7 @@ class AdditionalItems(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
 # ## Combining Schema
 
 
-class Not(Trait, metaclass=_ContainerType):
+class Not(Trait, _NoInit, metaclass=_ContainerType):
     """not schema.
     
 
@@ -729,7 +729,7 @@ Note
 """
 
 
-class AnyOf(_NoInit, Trait, metaclass=_ContainerType):
+class AnyOf(Trait, _NoInit, metaclass=_ContainerType):
     """anyOf combined schema.
     
 Examples
@@ -743,7 +743,7 @@ Examples
 """
 
 
-class AllOf(_NoInit, Trait, metaclass=_ContainerType):
+class AllOf(Trait, _NoInit, metaclass=_ContainerType):
     """allOf combined schema.
     
 Examples
@@ -757,7 +757,7 @@ Examples
 """
 
 
-class OneOf(_NoInit, Trait, metaclass=_ContainerType):
+class OneOf(Trait, _NoInit, metaclass=_ContainerType):
     """oneOf combined schema.
 
 Examples
@@ -772,7 +772,7 @@ Examples
 """
 
 
-class Enum(Trait, metaclass=_ConstType):
+class Enum(Trait, _NoInit, metaclass=_ConstType):
     """An enumerate type that is restricted to its inputs.
     
     
