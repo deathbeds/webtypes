@@ -122,8 +122,12 @@ _type
         """Validate the proposed schema against the jsonschema schema."""
         return cls
 
+    def example(cls):
+        return __import__("hypothesis_jsonschema").from_schema(cls._schema).example()
+
     def create(cls, name: str, **schema):
         """Create a new schema type.
+        
 
 Parameters
 ----------
@@ -579,6 +583,10 @@ class _Object(metaclass=_ObjectSchema):
     def __init_subclass__(cls, **kwargs):
         cls._schema = copy.deepcopy(cls._schema)
         cls._schema.update(kwargs)
+        if "properties" in cls._schema:
+            cls._schema.properties.update(
+                Properties[cls.__annotations__]._schema.properties
+            )
         cls._schema.update(Properties[cls.__annotations__]._schema)
         required = []
         for key in cls.__annotations__:
@@ -602,6 +610,9 @@ Examples
 --------
 
     >>> assert istype(Dict, __import__('collections').abc.MutableMapping)
+    >>> assert (Dict + Default[{'b': 'foo'}])() == {'b': 'foo'}
+    >>> assert (Dict + Default[{'b': 'foo'}])({'a': 'bar'}) == {'a': 'bar'}
+
 
     >>> assert isinstance({}, Dict)
     >>> assert not isinstance([], Dict)
@@ -624,14 +635,18 @@ Examples
     """
 
     def __new__(cls, *args, **kwargs):
-        return super().__new__(cls, dict(*args, **kwargs))
+        if not (args or kwargs):
+            args = cls._resolve_defaults()
+        else:
+            args = (dict(*args, **kwargs),)
+        return super().__new__(cls, *args)
 
     def _validate(self):
         type(self).validate(self)
 
     def __setitem__(self, key, object):
         """Only test the key being set to avoid invalid state."""
-        properties = self._schema.get("properties", None)
+        properties = self._schema.get("properties", {})
         if key in properties:
             jsonschema.validate(
                 object,
@@ -692,6 +707,7 @@ Examples
 
     def __new__(cls, *args, **kwargs):
         self = super(Trait, cls).__new__(cls)
+        # dataclass instantiates the defaults for us.
         self.__init__(*args, **kwargs)
         return self
 
@@ -703,7 +719,7 @@ Examples
         """Only test the attribute being set to avoid invalid state."""
         if isinstance(object, dict):
             object = object.get(key)
-        properties = self._schema.get("properties", None)
+        properties = self._schema.get("properties", {})
         (
             jsonschema.validate(
                 object,
@@ -780,6 +796,7 @@ Examples
 --------
 
     >>> assert isinstance('abc', String)
+    >>> assert (String+Default['abc'])() == 'abc'
     
 String patterns
 
@@ -869,6 +886,7 @@ Tuple
     _schema = dict(type="array")
 
     def __new__(cls, *args, **kwargs):
+        args = cls._resolve_defaults(*args)
         if args and isinstance(args[0], tuple):
             args = (list(args[0]) + list(args[1:]),)
         return super().__new__(cls, *args, **kwargs)
@@ -1080,11 +1098,11 @@ class ContentEncoding(
 """
 
 
-class Format(Enum[_formats], _NoInit, _NoTitle):
+class Format(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
     ...
 
 
-for key in Format._schema.enum:
+for key in _formats:
     locals()[key.capitalize()] = String + Format[key]
 Regex.compile = re.compile
 del key
