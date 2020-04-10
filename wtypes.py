@@ -243,7 +243,7 @@ def _python_to_wtype(object):
         elif object == float:
             object = Float
         elif object == None:
-            object = Null
+            object = None
         elif object == bool:
             object = Bool
     return object
@@ -316,18 +316,7 @@ Returns
 object
     Return an instance of the object and carry along the schema information.
 """
-        if not args and not kwargs:
-            default = cls._schema.get("default", None)
-            if default is not None:
-                args = (default,)
-            elif "properties" in cls._schema:
-                args = (
-                    {
-                        k: v["default"]
-                        for k, v in cls._schema["properties"]
-                        if "default" in v
-                    },
-                )
+        args = cls._resolve_defaults(*args, **kwargs)
         args and cls.validate(args[0])
         if dataclasses.is_dataclass(cls):
             self = super().__new__(cls, *args, **kwargs)
@@ -340,6 +329,21 @@ object
             self.__init__(*args, **kwargs)
         args or cls.validate(self)
         return self
+
+    @classmethod
+    def _resolve_defaults(cls, *args, **kwargs):
+        if not args and not kwargs:
+            if "default" in cls._schema:
+                return (cls._schema.default,)
+            elif "properties" in cls._schema:
+                return (
+                    {
+                        k: v["default"]
+                        for k, v in cls._schema["properties"]
+                        if "default" in v
+                    },
+                )
+        return args
 
 
 class Description(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
@@ -404,6 +408,7 @@ Examples
 
     >>> Bool(), Bool(True), Bool(False)
     (False, True, False)
+    >>> assert (Bool + Default[True])()
     
 Note
 ----
@@ -414,6 +419,7 @@ It is not possible to base class ``bool`` so object creation is customized.
     _schema = dict(type="boolean")
 
     def __new__(cls, *args):
+        args = cls._resolve_defaults(*args)
         args = args or (bool(),)
         args and cls.validate(args[0])
         return args[0]
@@ -426,6 +432,7 @@ Examples
 --------
 
     >>> Null(None)
+    >>> assert (Null + Default[None])() is None
     
 .. Null Type:
     https://json-schema.org/understanding-json-schema/reference/null.html
@@ -435,6 +442,7 @@ Examples
     _schema = dict(type="null")
 
     def __new__(cls, *args):
+        args = cls._resolve_defaults(*args)
         args and cls.validate(args[0])
 
 
@@ -474,26 +482,22 @@ class Integer(Trait, int, metaclass=_NumericSchema):
     """integer type
     
     
+Examples
+--------
+
     >>> assert isinstance(10, Integer)
+    >>> assert not isinstance(10.1, Integer)
     >>> (Integer+Default[9])(9)
     9
 
-Symbollic conditions.
 
-    >>> bounded = (10< Float)< 100
+    >>> bounded = (10< Integer)< 100
     >>> bounded._schema.toDict()
-    {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+    {'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
     >>> assert isinstance(12, bounded)
     >>> assert not isinstance(0, bounded)
-
-Multiples
-
-    >>> assert (Integer+MultipleOf[3])(9) == 9
-
-
-.. Numeric Types:
-    https://json-schema.org/understanding-json-schema/reference/numeric.html
+    >>> assert (Integer/3)(9) == 9
     
     """
 
@@ -504,16 +508,25 @@ class Float(Trait, float, metaclass=_NumericSchema):
     """float type
     
     
-    >>> assert isinstance(10, Integer)
-    >>> assert not isinstance(10.1, Integer)
+    >>> assert isinstance(10, Float)
+    >>> assert isinstance(10.1, Float)
+
+Symbollic conditions.
 
     >>> bounded = (10< Float)< 100
     >>> bounded._schema.toDict()
     {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
-    >>> assert isinstance(12, bounded)
-    >>> assert not isinstance(0, bounded)
-    >>> assert (Integer/3)(9) == 9
+    >>> assert isinstance(12.1, bounded)
+    >>> assert not isinstance(0.1, bounded)
+
+Multiples
+
+    >>> assert (Float+MultipleOf[3])(9) == 9
+
+
+.. Numeric Types:
+    https://json-schema.org/understanding-json-schema/reference/numeric.html
     
     """
 
@@ -570,7 +583,7 @@ class _Object(metaclass=_ObjectSchema):
         required = []
         for key in cls.__annotations__:
             if hasattr(cls, key):
-                cls._schema.properties[key]["default"] = getattr(cls, key)
+                ...  # cls._schema.properties[key]['default'] = getattr(cls, key)
             else:
                 required.append(key)
         if required:
