@@ -343,7 +343,7 @@ object
                 return (
                     {
                         k: v["default"]
-                        for k, v in cls._schema["properties"]
+                        for k, v in cls._schema["properties"].items()
                         if "default" in v
                     },
                 )
