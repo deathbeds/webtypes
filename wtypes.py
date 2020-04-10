@@ -569,7 +569,7 @@ class _Object(metaclass=_ObjectSchema):
         cls._schema.update(Properties[cls.__annotations__]._schema)
         required = []
         for key in cls.__annotations__:
-            if hasattr(cls, key):
+            if getattr(cls, key, None) is not None:
                 cls._schema.properties[key].default = getattr(cls, key)
             else:
                 required.append(key)
