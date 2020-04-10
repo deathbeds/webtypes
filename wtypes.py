@@ -137,7 +137,7 @@ Returns
 type
     
         """
-        return type(name, (cls,), {"_schema": copy.copy(cls._schema)}, **schema)
+        return type(name, (cls,), {"_schema": copy.deepcopy(cls._schema)}, **schema)
 
     def __neg__(cls):
         """The Not version of a type."""
@@ -564,13 +564,13 @@ class _Object(metaclass=_ObjectSchema):
     _schema = dict(type="object")
 
     def __init_subclass__(cls, **kwargs):
-        cls._schema = copy.copy(cls._schema)
+        cls._schema = copy.deepcopy(cls._schema)
         cls._schema.update(kwargs)
         cls._schema.update(Properties[cls.__annotations__]._schema)
         required = []
         for key in cls.__annotations__:
-            if getattr(cls, key, None) is not None:
-                cls._schema.properties[key].default = getattr(cls, key)
+            if hasattr(cls, key):
+                cls._schema.properties[key]["default"] = getattr(cls, key)
             else:
                 required.append(key)
         if required:
