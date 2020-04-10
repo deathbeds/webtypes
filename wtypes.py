@@ -23,6 +23,7 @@ __version__ = "0.0.1"
 import abc
 import copy
 import dataclasses
+import functools
 import inspect
 import re
 import typing
@@ -136,7 +137,7 @@ Returns
 type
     
         """
-        return type(name, (cls,), {"_schema": copy.copy(cls._schema)}, **schema)
+        return type(name, (cls,), {"_schema": copy.deepcopy(cls._schema)}, **schema)
 
     def __neg__(cls):
         """The Not version of a type."""
@@ -237,10 +238,12 @@ def _python_to_wtype(object):
             object = Dict
         elif object == int:
             object = Integer
+        elif object == tuple:
+            object = Tuple
         elif object == float:
             object = Float
         elif object == None:
-            object = Null
+            object = None
         elif object == bool:
             object = Bool
     return object
@@ -250,7 +253,7 @@ def _get_schema_from_typeish(object):
     """infer a schema from an object."""
     if isinstance(object, dict):
         return {k: _get_schema_from_typeish(v) for k, v in object.items()}
-    if isinstance(object, tuple):
+    if isinstance(object, (list, tuple)):
         return list(map(_get_schema_from_typeish, object))
     object = _python_to_wtype(object)
     if hasattr(object, "_schema"):
@@ -267,6 +270,9 @@ def _object_to_webtype(object):
         return Dict
     if isinstance(object, str):
         return String
+    if isinstance(object, tuple):
+        return Tuple
+
     if isinstance(object, typing.Sequence):
         return List
     if isinstance(object, bool):
@@ -310,15 +316,34 @@ Returns
 object
     Return an instance of the object and carry along the schema information.
 """
+        args = cls._resolve_defaults(*args, **kwargs)
         args and cls.validate(args[0])
-        if isinstance(cls, _ContainerType):
+        if dataclasses.is_dataclass(cls):
+            self = super().__new__(cls, *args, **kwargs)
+            cls.validate(vars(self))
+        elif isinstance(cls, _ConstType) or issubclass(cls, Tuple):
             if args:
                 return _object_to_webtype(args[0])(args[0])
-        return super().__new__(cls, *args, **kwargs)
+        else:
+            self = super().__new__(cls, *args, **kwargs)
+            self.__init__(*args, **kwargs)
+        args or cls.validate(self)
+        return self
 
-
-#             except: return  if args else cls()
-#             return self
+    @classmethod
+    def _resolve_defaults(cls, *args, **kwargs):
+        if not args and not kwargs:
+            if "default" in cls._schema:
+                return (cls._schema.default,)
+            elif "properties" in cls._schema:
+                return (
+                    {
+                        k: v["default"]
+                        for k, v in cls._schema["properties"]
+                        if "default" in v
+                    },
+                )
+        return args
 
 
 class Description(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
@@ -336,6 +361,10 @@ Examples
 
 
 class Examples(_NoInit, Trait, metaclass=_ConstType):
+    """"""
+
+
+class Default(_NoInit, Trait, metaclass=_ConstType):
     """"""
 
 
@@ -379,6 +408,7 @@ Examples
 
     >>> Bool(), Bool(True), Bool(False)
     (False, True, False)
+    >>> assert (Bool + Default[True])()
     
 Note
 ----
@@ -389,6 +419,7 @@ It is not possible to base class ``bool`` so object creation is customized.
     _schema = dict(type="boolean")
 
     def __new__(cls, *args):
+        args = cls._resolve_defaults(*args)
         args = args or (bool(),)
         args and cls.validate(args[0])
         return args[0]
@@ -401,6 +432,7 @@ Examples
 --------
 
     >>> Null(None)
+    >>> assert (Null + Default[None])() is None
     
 .. Null Type:
     https://json-schema.org/understanding-json-schema/reference/null.html
@@ -410,6 +442,7 @@ Examples
     _schema = dict(type="null")
 
     def __new__(cls, *args):
+        args = cls._resolve_defaults(*args)
         args and cls.validate(args[0])
 
 
@@ -449,24 +482,22 @@ class Integer(Trait, int, metaclass=_NumericSchema):
     """integer type
     
     
->>> assert isinstance(10, Float)
+Examples
+--------
 
-Symbollic conditions.
+    >>> assert isinstance(10, Integer)
+    >>> assert not isinstance(10.1, Integer)
+    >>> (Integer+Default[9])(9)
+    9
 
-    >>> bounded = (10< Float)< 100
+
+    >>> bounded = (10< Integer)< 100
     >>> bounded._schema.toDict()
-    {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+    {'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
     >>> assert isinstance(12, bounded)
     >>> assert not isinstance(0, bounded)
-
-Multiples
-
-    >>> assert (Integer+MultipleOf[3])(9) == 9
-
-
-.. Numeric Types:
-    https://json-schema.org/understanding-json-schema/reference/numeric.html
+    >>> assert (Integer/3)(9) == 9
     
     """
 
@@ -477,16 +508,25 @@ class Float(Trait, float, metaclass=_NumericSchema):
     """float type
     
     
-    >>> assert isinstance(10, Integer)
-    >>> assert not isinstance(10.1, Integer)
+    >>> assert isinstance(10, Float)
+    >>> assert isinstance(10.1, Float)
+
+Symbollic conditions.
 
     >>> bounded = (10< Float)< 100
     >>> bounded._schema.toDict()
     {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
-    >>> assert isinstance(12, bounded)
-    >>> assert not isinstance(0, bounded)
-    >>> assert (Integer/3)(9) == 9
+    >>> assert isinstance(12.1, bounded)
+    >>> assert not isinstance(0.1, bounded)
+
+Multiples
+
+    >>> assert (Float+MultipleOf[3])(9) == 9
+
+
+.. Numeric Types:
+    https://json-schema.org/understanding-json-schema/reference/numeric.html
     
     """
 
@@ -537,14 +577,22 @@ class _Object(metaclass=_ObjectSchema):
     _schema = dict(type="object")
 
     def __init_subclass__(cls, **kwargs):
-        cls._schema = copy.copy(cls._schema)
+        cls._schema = copy.deepcopy(cls._schema)
         cls._schema.update(kwargs)
         cls._schema.update(Properties[cls.__annotations__]._schema)
+        required = []
+        for key in cls.__annotations__:
+            if hasattr(cls, key):
+                ...  # cls._schema.properties[key]['default'] = getattr(cls, key)
+            else:
+                required.append(key)
+        if required:
+            cls._schema["required"] = required
 
-    def load(self, *object):
-        self.update(__import__("anyconfig").load(object))
-        type(self).validate(self)
-        return self
+    @classmethod
+    def from_config_file(cls, *object):
+        args = __import__("anyconfig").load(object)
+        return cls(args)
 
 
 class Dict(Trait, dict, _Object):
@@ -552,6 +600,8 @@ class Dict(Trait, dict, _Object):
     
 Examples
 --------
+
+    >>> assert istype(Dict, __import__('collections').abc.MutableMapping)
 
     >>> assert isinstance({}, Dict)
     >>> assert not isinstance([], Dict)
@@ -573,9 +623,36 @@ Examples
     https://json-schema.org/understanding-json-schema/reference/object.html
     """
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __new__(cls, *args, **kwargs):
+        return super().__new__(cls, dict(*args, **kwargs))
+
+    def _validate(self):
         type(self).validate(self)
+
+    def __setitem__(self, key, object):
+        """Only test the key being set to avoid invalid state."""
+        properties = self._schema.get("properties", None)
+        if key in properties:
+            jsonschema.validate(
+                object,
+                self._schema.get("properties", {}).get(key, {}),
+                format_checker=jsonschema.draft7_format_checker,
+            )
+        else:
+            jsonschema.validate(
+                {key: object},
+                {**self._schema, "required": []},
+                format_checker=jsonschema.draft7_format_checker,
+            )
+        super().__setitem__(key, object)
+
+    def update(self, *args, **kwargs):
+        jsonschema.validate(
+            dict(*args, **kwargs),
+            {**self._schema, "required": []},
+            format_checker=jsonschema.draft7_format_checker,
+        )
+        super().update(*args, **kwargs)
 
 
 class Bunch(Dict, munch.Munch):
@@ -604,10 +681,12 @@ Examples
 
     >>> class q(DataClass): a: int
     >>> q._schema.toDict()
-    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+    {'type': 'object', 'properties': {'a': {'type': 'integer'}}, 'required': ['a']}
 
     >>> q(a=10)
     q(a=10)
+    
+    >>> assert not isinstance({}, q)
     
     """
 
@@ -617,11 +696,29 @@ Examples
         return self
 
     def __init_subclass__(cls, **kwargs):
-        cls._schema.update(Properties[cls.__annotations__]._schema)
+        super().__init_subclass__()
         dataclasses.dataclass(cls)
 
-    def __post_init__(self):
-        type(self).validate(vars(self))
+    def __setattr__(self, key, object):
+        """Only test the attribute being set to avoid invalid state."""
+        if isinstance(object, dict):
+            object = object.get(key)
+        properties = self._schema.get("properties", None)
+        (
+            jsonschema.validate(
+                object,
+                self._schema.get("properties", {}).get(key, {}),
+                format_checker=jsonschema.draft7_format_checker,
+            )
+            if key in properties
+            else jsonschema.validate(
+                {key: object},
+                {**self._schema, "required": []},
+                format_checker=jsonschema.draft7_format_checker,
+            )
+        )
+        super().__setattr__(key, object)
+        # trigger change here.
 
 
 class AdditionalProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
@@ -657,7 +754,6 @@ class PatternProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
 
 class _StringSchema(_SchemaMeta):
     """Meta operations for strings types.
-    
     """
 
     def __mod__(cls, object):
@@ -723,9 +819,22 @@ class _ListSchema(_SchemaMeta):
     """Meta operations for list types."""
 
     def __getitem__(cls, object):
-        if isinstance(object, tuple):
+        if istype(cls, Tuple) and isinstance(object, (tuple, list)):
+            return cls + Items[list(object)]
+        elif isinstance(object, tuple):
             return cls + Items[AnyOf[object]]
         return cls + Items[object]
+
+    def __gt__(cls, object):
+        """Minumum array length"""
+        return cls + MinItems[object]
+
+    def __lt__(cls, object):
+        """Maximum array length"""
+        return cls + MaxItems[object]
+
+    __rgt__ = __rge__ = __le__ = __lt__
+    __rlt__ = __rle__ = __ge__ = __gt__
 
 
 class List(Trait, list, metaclass=_ListSchema):
@@ -742,16 +851,73 @@ List
     
 Typed list
 
+    >>> assert List[Integer]([1, 2, 3])
     >>> assert isinstance([1], List[Integer])
     >>> assert not isinstance([1.1], List[Integer])
     
+    >>> List[Integer, String]._schema.toDict()
+    {'type': 'array', 'items': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}}
+
+    
 Tuple        
     
+    >>> assert List[Integer, String]([1, 'abc', 2])
     >>> assert isinstance([1, '1'], List[Integer, String])
     >>> assert not isinstance([1, {}], List[Integer, String])
     """
 
     _schema = dict(type="array")
+
+    def __new__(cls, *args, **kwargs):
+        if args and isinstance(args[0], tuple):
+            args = (list(args[0]) + list(args[1:]),)
+        return super().__new__(cls, *args, **kwargs)
+
+    def _verify_item(self, object, id=None):
+        items = self._schema.get("items", None)
+        if items:
+            if isinstance(items, dict):
+                if isinstance(id, slice):
+                    List[items].validate(object)
+                else:
+                    jsonschema.validate(
+                        object, items, format_checker=jsonschema.draft7_format_checker
+                    )
+            elif isinstance(items, list):
+                if isinstance(id, slice):
+                    # condition for negative slices
+                    Tuple[tuple(items[id])].validate(object)
+                elif isinstance(id, int):
+                    # condition for negative integers
+                    jsonschema.validate(
+                        object,
+                        items[id],
+                        format_checker=jsonschema.draft7_format_checker,
+                    )
+
+    def __setitem__(self, id, object):
+        self._verify_item(object, id)
+        super().__setitem__(id, object)
+
+    def append(self, object):
+        self._verify_item(object, len(self) + 1)
+        super().append(object)
+
+    def insert(self, id, object):
+        self._verify_item(object, id)
+        super().insert(id, object)
+
+    def extend(self, object):
+        id = slice(len(self), len(self) + 3)
+        self._verify_item(object, id)
+        super().extend(object)
+
+    def pop(self, index=-1, default=None):
+        value = super().pop(index, default)
+        try:
+            type(self).validate(self)
+        except ValidationError:
+            self.insert(index, value)
 
 
 class Unique(List, uniqueItems=True):
@@ -761,22 +927,14 @@ class Unique(List, uniqueItems=True):
 Examples
 --------
 
+    >>> assert Unique(list('abc'))
     >>> assert isinstance([1,2], Unique)
     >>> assert not isinstance([1,1], Unique)
     
     """
 
 
-class _TupleSchema(_SchemaMeta):
-    """Meta operations for list types."""
-
-    def __getitem__(cls, object):
-        if not isinstance(object, tuple):
-            object = (object,)
-        return cls + Items[object]
-
-
-class Tuple(Trait, metaclass=_TupleSchema):
+class Tuple(List):
     """tuple type
     
 Note
@@ -790,12 +948,14 @@ Examples
 --------
 
     >>> assert isinstance([1,2], Tuple)
-    >>> assert isinstance([1,'1'], Tuple[Integer, String])
-    >>> assert not isinstance([1,1], Tuple[Integer, String])
+    >>> assert Tuple[Integer, String]([1, 'abc'])
+    >>> Tuple[Integer, String]._schema.toDict()
+    {'type': 'array', 'items': [{'type': 'integer'}, {'type': 'string'}]}
+
+    >>> assert isinstance([1,'1'], Tuple[[Integer, String]])
+    >>> assert not isinstance([1,1], Tuple[[Integer, String]])
     
     """
-
-    _schema = dict(type="array")
 
 
 class UniqueItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
@@ -812,6 +972,14 @@ class Items(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
 
 class AdditionalItems(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
+
+
+class MinItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Minimum length of an array."""
+
+
+class MaxItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    """Maximum length of an array."""
 
 
 # ## Combining Schema
@@ -842,6 +1010,7 @@ class AnyOf(Trait, _NoInit, metaclass=_ContainerType):
 Examples
 --------
 
+    >>> assert AnyOf[Integer, String]('abc')
     >>> assert isinstance(10, AnyOf[Integer, String])
     >>> assert not isinstance([], AnyOf[Integer, String])
     
@@ -856,6 +1025,7 @@ class AllOf(Trait, _NoInit, metaclass=_ContainerType):
 Examples
 --------
 
+    >>> assert AllOf[Float>0, Integer/3](9)
     >>> assert isinstance(9, AllOf[Float>0, Integer/3])
     >>> assert not isinstance(-9, AllOf[Float>0, Integer/3])
     
@@ -870,6 +1040,7 @@ class OneOf(Trait, _NoInit, metaclass=_ContainerType):
 Examples
 --------
 
+    >>> assert OneOf[Float>0, Integer/3](-9)
     >>> assert isinstance(-9, OneOf[Float>0, Integer/3])
     >>> assert not isinstance(9, OneOf[Float>0, Integer/3])
 
@@ -879,13 +1050,14 @@ Examples
 """
 
 
-class Enum(Trait, _NoInit, metaclass=_ConstType):
+class Enum(Trait, metaclass=_ConstType):
     """An enumerate type that is restricted to its inputs.
     
     
 Examples
 --------
 
+    >>> assert Enum['cat', 'dog']('cat')
     >>> assert isinstance('cat', Enum['cat', 'dog'])
     >>> assert not isinstance('🐢', Enum['cat', 'dog'])
 
@@ -918,16 +1090,20 @@ Regex.compile = re.compile
 del key
 
 
-class If(Trait, metaclass=_ContainerType):
-    ...
+class If(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """if condition type
+    
+.. Conditions:
+    https://json-schema.org/understanding-json-schema/reference/conditionals.html
+    """
 
 
-class Then(Trait, metaclass=_ContainerType):
-    ...
+class Then(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """then condition type"""
 
 
-class Else(Trait, metaclass=_ContainerType):
-    ...
+class Else(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+    """else condition type"""
 
 
 # ## Configuration classes
@@ -938,6 +1114,8 @@ class Configurable(DataClass):
 
 
 if __name__ == "__main__":
+    from IPython import get_ipython
+
     if "__file__" in locals():
         if "covtest" in __import__("sys").argv:
             print(__import__("doctest").testmod(optionflags=8))
@@ -955,7 +1133,4 @@ if __name__ == "__main__":
         get_ipython().system("coverage html")
         with IPython.utils.capture.capture_output():
             get_ipython().system("pyreverse wtypes -osvg -pwtypes")
-        IPython.display.display(IPython.display.SVG("classes_wtypes.svg"))
-        with IPython.utils.capture.capture_output():
-            get_ipython().system("pyreverse wtypes -osvg -pwtypes -my -s1")
         IPython.display.display(IPython.display.SVG("classes_wtypes.svg"))
