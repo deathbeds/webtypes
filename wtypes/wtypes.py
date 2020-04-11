@@ -1257,26 +1257,3 @@ Examples
 
 class Configurable(DataClass):
     """A configurable classs that is create with dataclass syntax."""
-
-
-if __name__ == "__main__":
-    from IPython import get_ipython
-
-    if "__file__" in locals():
-        if "covtest" in __import__("sys").argv:
-            print(__import__("doctest").testmod(optionflags=8))
-    else:
-        import IPython
-
-        get_ipython().system(
-            "jupyter nbconvert --to python --TemplateExporter.exclude_input_prompt=True wtypes.ipynb"
-        )
-        with IPython.utils.capture.capture_output():
-            get_ipython().system("black wtypes.py")
-        get_ipython().system("isort wtypes.py")
-        get_ipython().system("ipython -m coverage -- run wtypes.py covtest")
-        get_ipython().system("coverage report")
-        get_ipython().system("coverage html")
-        with IPython.utils.capture.capture_output():
-            get_ipython().system("pyreverse wtypes -osvg -pwtypes")
-        IPython.display.display(IPython.display.SVG("classes_wtypes.svg"))
