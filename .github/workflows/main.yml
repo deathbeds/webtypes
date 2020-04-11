@@ -23,7 +23,7 @@ jobs:
         pip install .
     - name: Test with pytest
       run: |
-        pip install pytest pytest-cov importnb
+        pip install pytest pytest-cov importnb .[examples]
         pytest --doctest-modules
         
     - name: Build
