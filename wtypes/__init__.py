@@ -21,3 +21,4 @@ Todo
 """
 __version__ = "0.0.1"
 from .wtypes import *
+from . import examples

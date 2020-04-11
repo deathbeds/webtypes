@@ -120,16 +120,6 @@ _type
         """Validate the proposed schema against the jsonschema schema."""
         return cls
 
-    def example(cls):
-        """Generate an example from a schema. 
-        
-        
-    Note
-    ----
-    Requires hypothesis_jsonschema
-    """
-        return __import__("hypothesis_jsonschema").from_schema(cls._schema).example()
-
     def create(cls, name: str, **schema):
         """Create a new schema type.
         
