@@ -19,6 +19,8 @@ Todo
 .. ``jsonschema`` documentation:
    https://json-schema.org/
 """
-__version__ = "0.0.1"
+__version__ = "0.0.2"
 from .wtypes import *
+from .dataclass import *
+from . import evented
 from . import examples
