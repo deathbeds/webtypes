@@ -6,7 +6,55 @@
 
 """
 
-import wtypes, inspect
+import wtypes, inspect, contextlib, functools, typing
+
+class spec:
+    @wtypes.specification
+    def dlink(this, source, that, target, callable):
+        """"""
+
+    @wtypes.specification
+    def link(this, source, that, target):
+        """"""
+
+def get_jawn(thing, key, object):
+    if isinstance(thing, typing.Mapping):
+        return thing.get(key, object)
+    return getattr(thing, key, object)
+
+def set_jawn(thing, key, object):
+    if isinstance(thing, typing.Mapping):
+        thing[key] = object
+    else:
+        setattr(thing, key, object)
+
+class spec_impl:
+    def __enter__(self):
+        wtypes.manager.register(type(self))
+
+    def __exit__(self, *e):
+        wtypes.manager.unregister(type(self))
+
+class wtypes_impl(spec_impl):
+    @wtypes.implementation
+    def dlink(this, source, that, target, callable):
+        if issubclass(type(this), wtypes.Trait):
+            if this is that and source == target:
+                raise TypeError("""Linking types to themselves causes recursion.""")
+            this._registered_links = this._registered_links or {}
+            this._registered_id = this._registered_id or {}
+            this._registered_links[source] = this._registered_links.get(source, {})
+            if id(that) not in this._registered_links[source]:
+                this._registered_links[source][id(that)] = {}
+            if target not in this._registered_links[source][id(that)]:
+                this._registered_links[source][id(that)][target] = None
+            if id(that) not in this._registered_id:
+                this._registered_id[id(that)] = that
+            this._registered_links[source][id(that)][target] = callable
+            return this
+
+wtypes.manager.add_hookspecs(spec)
+wtypes.manager.register(wtypes_impl)
 
 class Link:
     _registered_links = None
@@ -14,6 +62,7 @@ class Link:
     _deferred_changed = None
     _deferred_prior = None
     _depth = 0
+    _display_id = None
 
     def __enter__(self):
         self._depth += 1
@@ -23,8 +72,8 @@ class Link:
         self._deferred_changed and e == (None, None, None) and self._propagate()
 
     def link(this, source, that, target):
-        this.dlink(source, that, target)
-        that.dlink(target, this, source)
+        wtypes.manager.hook.dlink(this=this, source=source, that=that, target=target, callable=None)
+        wtypes.manager.hook.dlink(this=that, source=target, that=this, target=source, callable=None)
         return this
 
     def dlink(self, source, that, target, callable=None):
@@ -40,18 +89,7 @@ class Link:
         {'a': 14}
 
         """
-        if self is that and source == 'target':
-            raise TypeError("""Linking types to themselves causes recursion.""")
-        self._registered_links = self._registered_links or {}
-        self._registered_id = self._registered_id or {}
-        self._registered_links[source] = self._registered_links.get(source, {})
-        if id(that) not in self._registered_links[source]:
-            self._registered_links[source][id(that)] = {}
-        if target not in self._registered_links[source][id(that)]:
-            self._registered_links[source][id(that)][target] = None
-        if id(that) not in self._registered_id:
-            self._registered_id[id(that)] = that
-        self._registered_links[source][id(that)][target] = callable
+        wtypes.manager.hook.dlink(this=self, source=source, that=that, target=target, callable=callable)
         return self
 
     def observe(self, source, callable=None):
@@ -77,15 +115,14 @@ class Link:
                 key = self._deferred_changed.pop(-1)
                 old = self._deferred_prior.pop(key, None)
                 for hash in (
-                    self._registered_links[key] if self._registered_links else []
+                    self._registered_links[key] if self._registered_links and key in self._registered_links else []
                 ):
                     thing = self._registered_id[hash]
                     if hash == id(self):
                         for func in self._registered_links[key][hash]:
                             func(
-                                self,
                                 dict(
-                                    new=getattr(self, key, None),
+                                    new=self.get(key, None),
                                     old=old,
                                     object=self,
                                     name=key,
@@ -96,13 +133,18 @@ class Link:
                             if callable(function):
                                 thing.update({to: function(self[key])})
                             else:
-                                if thing.get(to, None) is not self.get(
-                                    key, inspect._empty
-                                ):
-                                    thing.update({to: self[key]})
+                                if get_jawn(thing, to, None) is not get_jawn(self, key, inspect._empty):
+                                    set_jawn(thing, to, self[key])
+        self._display_id and self._display_id.update(__import__('IPython').display.JSON(self))
+                                    
+    def _ipython_display_(self):
+        import IPython, json
+        if self._display_id:
+            self._display_id.display(IPython.display.JSON(self))
+        else:
+            self._display_id = IPython.display.display(IPython.display.JSON(self), display_id=True)
 
 class _EventedDict(Link):
-
     def __setitem__(self, key, object):
         with self:
             prior = self.get(key, None)
@@ -119,6 +161,8 @@ class _EventedDict(Link):
                 k: v for k, v in prior.items() if v is not self.get(k, inspect._empty)
             }
             prior and self._propagate(*prior, **prior)
+
+
 
 
 class Bunch(_EventedDict, wtypes.wtypes.Bunch):
@@ -169,3 +213,33 @@ Examples
     Dict({'a': 2}) {'new': 2, 'old': None, 'object': Dict({'a': 2}), 'name': 'a'}
     
     """
+
+class ipywidgets(spec_impl):
+    @wtypes.implementation
+    def dlink(this, source, that, target, callable):
+        import ipywidgets
+        if isinstance(that, ipywidgets.Widget):
+            this.observe(source, lambda x: setattr(that, target, x['new']))
+            that.observe(lambda x: this.__setitem__(source, x['new']), target)
+
+        if isinstance(this, ipywidgets.Widget):
+            this.observe(lambda x: that.__setitem__(target, x['new']), source)
+            that.observe(target, lambda x: setattr(this, source, x['new']))
+
+class panel(spec_impl):
+    """Not working yet."""
+    @wtypes.implementation
+    def dlink(this, source, that, target, callable):
+        def param_wrap(param, that, target):
+            def callback(*events):
+                for event in events:
+                    set_jawn(that, target, event.new)
+
+        import param
+        if isinstance(that, param.parameterized.Parameterized):
+            this.observe(source, lambda x: setattr(that, target, x['new']))
+            that.param.watch(param_wrap(that, this, source), target)
+
+        if isinstance(this, param.parameterized.Parameterized):
+            this.param.watch(param_wrap(this, that, target), source )
+            that.observe(target, lambda x: setattr(this, source, x['new']))
