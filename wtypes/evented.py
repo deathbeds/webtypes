@@ -232,10 +232,10 @@ Examples
     >>> e.link('a', f, 'b')
     {}
     >>> e['a'] = 1
-    >>> f.toDict()
+    >>> f
     {'b': 1}
     >>> e.update(a=100)
-    >>> f.toDict()
+    >>> f
     {'b': 100}
     
     >>> f['b'] = 2
