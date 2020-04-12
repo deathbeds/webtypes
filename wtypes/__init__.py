@@ -23,26 +23,8 @@ __version__ = "0.0.2"
 
 import pluggy
 
-from . import base, dataclass, evented, examples, python_types
+from . import _spec, base, dataclass, evented, examples, python_types
 from .base import *
 from .dataclass import *
 from .python_types import *
 from .string_formats import *
-
-specification = pluggy.HookspecMarker("wtypes")
-implementation = pluggy.HookimplMarker("wtypes")
-manager = pluggy.PluginManager("wtypes")
-
-
-class spec:
-    @specification(firstresult=True)
-    def validate_type(type):
-        "A hook to validate types."
-
-    @specification(firstresult=True)
-    def validate_object(object, schema):
-        "A hook to validate types."
-
-
-manager.add_hookspecs(spec)
-del pluggy
