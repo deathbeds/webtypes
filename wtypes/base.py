@@ -797,6 +797,9 @@ class ContentMediaType(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
 class Pattern(Trait, _NoInit, metaclass=_ConstType):
     """A regular expression pattern."""
 
+class Format(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+    ...
+
 
 # ## Array Type
 
