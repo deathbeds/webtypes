@@ -21,16 +21,17 @@ Todo
 """
 __version__ = "0.0.1"
 import abc
+import builtins
 import copy
 import dataclasses
 import functools
 import inspect
 import re
 import typing
-import builtins
 
 import jsonschema
 import munch
+
 import wtypes
 
 simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes"][
@@ -38,7 +39,6 @@ simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes
 ]
 ValidationError = jsonschema.ValidationError
 
-import jsonschema, wtypes
 
 
 class _Implementation:
@@ -153,7 +153,8 @@ _type
         cls = super().__new__(cls, name, base, kwargs)
         # Combine metadata across the module resolution order.
         cls._merge_annotations(), cls._merge_schema(), cls._merge_context()
-        wtypes.manager.hook.validate_type(type=cls)
+        if isinstance(cls._schema, dict):
+            wtypes.manager.hook.validate_type(type=cls)
         """Validate the proposed schema against the jsonschema schema."""
         return cls
 
@@ -315,7 +316,9 @@ def _python_to_wtype(object):
 def _get_schema_from_typeish(object):
     """infer a schema from an object."""
     if isinstance(object, dict):
-        return munch.Munch.fromDict({k: _get_schema_from_typeish(v) for k, v in object.items()})
+        return munch.Munch.fromDict(
+            {k: _get_schema_from_typeish(v) for k, v in object.items()}
+        )
     if isinstance(object, (list, tuple)):
         return list(map(_get_schema_from_typeish, object))
     object = _python_to_wtype(object)
@@ -832,7 +835,7 @@ class _ListSchema(_SchemaMeta):
     def __getitem__(cls, object):
         if istype(cls, Tuple):
             if not isinstance(object, tuple):
-                object = object,
+                object = (object,)
             return cls + Items[list(object)]
         elif isinstance(object, tuple):
             return cls + Items[AnyOf[object]]

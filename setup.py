@@ -1,4 +1,8 @@
-import toml, setuptools, pathlib, flit
+import pathlib
+
+import flit
+import setuptools
+import toml
 
 flit_data = toml.load('pyproject.toml')['tool']['flit']
 metadata = flit_data['metadata']

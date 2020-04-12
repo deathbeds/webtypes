@@ -1,5 +1,9 @@
 """Compatability for wtyped dataclasses."""
-import wtypes, dataclasses, jsonschema
+import dataclasses
+
+import jsonschema
+
+import wtypes
 
 
 class DataClass(wtypes.Trait, wtypes.base._Object):

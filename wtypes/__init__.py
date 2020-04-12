@@ -21,28 +21,11 @@ Todo
 """
 __version__ = "0.0.2"
 
-import pluggy
-
-specification = pluggy.HookspecMarker("wtypes")
-implementation = pluggy.HookimplMarker("wtypes")
-manager = pluggy.PluginManager("wtypes")
-
-
-class spec:
-    @specification(firstresult=True)
-    def validate_type(type):
-        "A hook to validate types."
-
-    @specification(firstresult=True)
-    def validate_object(object, schema):
-        "A hook to validate types."
-
-
-manager.add_hookspecs(spec)
-del pluggy
-
-from .base import *
+from .spec import *  # isort:skip
 from . import base
+from .base import *
 from .dataclass import *
+from .python_types import *
 from .string_formats import *
-from . import dataclass, evented, examples
+
+from . import dataclass, evented, examples, python_types  # isort:skip
