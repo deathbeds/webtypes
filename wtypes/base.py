@@ -734,7 +734,7 @@ class AdditionalProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     """Additional object properties."""
 
 
-class Required(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+class Required(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
     """Required properties."""
 
 
