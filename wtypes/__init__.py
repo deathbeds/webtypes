@@ -21,8 +21,7 @@ Todo
 """
 __version__ = "0.0.2"
 
-import pluggy
-
+from .spec import *  # isort:skip
 from . import _spec, base, dataclass, evented, examples, python_types
 from .base import *
 from .dataclass import *
