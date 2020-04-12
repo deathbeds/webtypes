@@ -552,7 +552,7 @@ Examples
 
     >>> bounded = (10< Integer)< 100
     >>> bounded._schema.toDict()
-    {'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+    {'exclusiveMaximum': 100, 'type': 'integer', 'exclusiveMinimum': 10}
 
     >>> assert isinstance(12, bounded)
     >>> assert not isinstance(0, bounded)
@@ -572,7 +572,7 @@ Symbollic conditions.
 
     >>> bounded = (10< Float)< 100
     >>> bounded._schema.toDict()
-    {'type': 'number', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+    {'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
 
     >>> assert isinstance(12.1, bounded)
     >>> assert not isinstance(0.1, bounded)
@@ -716,7 +716,7 @@ Examples
 --------
 
     >>> Bunch[{'a': int}]._schema.toDict()
-    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+    {'properties': {'a': {'type': 'integer'}}, 'type': 'object'}
     >>> Bunch[{'a': int}]({'a': 1}).toDict()
     {'a': 1}
 
@@ -865,7 +865,7 @@ Typed list
     >>> assert not isinstance([1.1], List[Integer])
     
     >>> List[Integer, String]._schema.toDict()
-    {'type': 'array', 'items': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}}
+    {'items': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, 'type': 'array'}
 
     
 Tuple        
