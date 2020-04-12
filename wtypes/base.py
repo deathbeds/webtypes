@@ -135,7 +135,7 @@ _type
                     schema[k] = v
         if "required" in schema:
             schema["required"] = list(set(schema["required"]))
-        cls._schema.update(schema)
+        cls._schema = schema
 
     def _merge_context(cls):
         context = munch.Munch()
@@ -315,13 +315,13 @@ def _python_to_wtype(object):
 def _get_schema_from_typeish(object):
     """infer a schema from an object."""
     if isinstance(object, dict):
-        return {k: _get_schema_from_typeish(v) for k, v in object.items()}
+        return munch.Munch.fromDict({k: _get_schema_from_typeish(v) for k, v in object.items()})
     if isinstance(object, (list, tuple)):
         return list(map(_get_schema_from_typeish, object))
     object = _python_to_wtype(object)
     if hasattr(object, "_schema"):
         return object._schema
-    return object
+    return munch.Munch.fromDict(object)
 
 
 def _lower_key(str):
@@ -635,7 +635,7 @@ class _Object(metaclass=_ObjectSchema, type="object"):
             cls._schema["properties"] = cls._schema.get("properties", munch.Munch())
             cls._schema["properties"][key] = _get_schema_from_typeish(value)
             if hasattr(cls, key):
-                cls._schema["properties"][key]["default"] = getattr(cls, key)
+                cls._schema.properties[key].default = getattr(cls, key)
             else:
                 cls._schema["required"] = cls._schema.get("required", [])
                 if key not in cls._schema["required"]:
