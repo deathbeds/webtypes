@@ -6,7 +6,7 @@
 
 """
 
-import wtypes
+import wtypes, inspect
 
 class Link:
     _registered_links = None
@@ -28,6 +28,18 @@ class Link:
         return this
 
     def dlink(self, source, that, target, callable=None):
+        """
+        
+    Examples
+    --------
+        >>> class d(evented.Dict): a: int
+        >>> e, f = d(a=1), d(a=1)
+        >>> e.dlink('a', f, 'a', lambda x: 2*x)
+        >>> e['a'] = 7
+        >>> f
+        {'a': 14}
+
+        """
         if self is that and source == 'target':
             raise TypeError("""Linking types to themselves causes recursion.""")
         self._registered_links = self._registered_links or {}
@@ -80,14 +92,16 @@ class Link:
                                 ),
                             )
                     else:
-                        for to, value in self._registered_links[key][hash].items():
-                            if callable(value):
-                                thing.update({to: callable(self[key])})
+                        for to, function in self._registered_links[key][hash].items():
+                            if callable(function):
+                                thing.update({to: function(self[key])})
                             else:
                                 if thing.get(to, None) is not self.get(
                                     key, inspect._empty
                                 ):
                                     thing.update({to: self[key]})
+
+class _EventedDict(Link):
 
     def __setitem__(self, key, object):
         with self:
@@ -107,7 +121,7 @@ class Link:
             prior and self._propagate(*prior, **prior)
 
 
-class Bunch(Link, wtypes.wtypes.Bunch):
+class Bunch(_EventedDict, wtypes.wtypes.Bunch):
     """An evented dictionary/bunch
 
 Examples
@@ -132,7 +146,7 @@ Examples
     """
 
 
-class Dict(Link, wtypes.wtypes.Dict):
+class Dict(_EventedDict, wtypes.wtypes.Dict):
     """An evented dictionary/bunch
 
 Examples
@@ -155,4 +169,3 @@ Examples
     EventedDict({'a': 2}) {'new': 2, 'old': None, 'object': EventedDict({'a': 2}), 'name': 'a'}
     
     """
-

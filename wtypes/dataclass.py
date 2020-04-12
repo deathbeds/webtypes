@@ -18,7 +18,7 @@ Examples
     """
 
     def __new__(cls, *args, **kwargs):
-        self = super(Trait, cls).__new__(cls)
+        self = super(wtypes.Trait, cls).__new__(cls)
         # dataclass instantiates the defaults for us.
         self.__init__(*args, **kwargs)
         return self
@@ -33,16 +33,14 @@ Examples
             object = object.get(key)
         properties = self._schema.get("properties", {})
         (
-            jsonschema.validate(
-                object,
-                self._schema.get("properties", {}).get(key, {}),
-                format_checker=jsonschema.draft7_format_checker,
+            wtypes.manager.hook.validate_object(
+                object=object,
+                schema=self._schema.get("properties", {}).get(key, {}),
             )
             if key in properties
-            else jsonschema.validate(
-                {key: object},
-                {**self._schema, "required": []},
-                format_checker=jsonschema.draft7_format_checker,
+            else wtypes.manager.hook.validate_object(
+                object={key: object},
+                schema={**self._schema, "required": []},
             )
         )
         super().__setattr__(key, object)
