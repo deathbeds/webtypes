@@ -43,7 +43,8 @@ class spec_impl:
 class wtypes_impl(spec_impl):
     @wtypes.implementation
     def dlink(this, source, that, target, callable):
-        set_jawn(that, target, get_jawn(this, source, None))
+        if hasatter(that, target) or isinstance(typing.Mapping) and target in that:
+            set_jawn(that, target, get_jawn(this, source, None))
         if issubclass(type(this), wtypes.Trait):
             if this is that and source == target:
                 raise TypeError("""Linking types to themselves causes recursion.""")

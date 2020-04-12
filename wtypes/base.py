@@ -572,7 +572,7 @@ Symbollic conditions.
 
     >>> bounded = (10< Float)< 100
     >>> bounded._schema.toDict()
-    {'type': 'integer', 'exclusiveMinimum': 10, 'exclusiveMaximum': 100}
+    {'exclusiveMaximum': 100, 'type': 'number', 'exclusiveMinimum': 10}
 
     >>> assert isinstance(12.1, bounded)
     >>> assert not isinstance(0.1, bounded)
@@ -828,7 +828,9 @@ class _ListSchema(_SchemaMeta):
     """Meta operations for list types."""
 
     def __getitem__(cls, object):
-        if istype(cls, Tuple) and isinstance(object, (tuple, list)):
+        if istype(cls, Tuple):
+            if not isinstance(object, tuple):
+                object = object,
             return cls + Items[list(object)]
         elif isinstance(object, tuple):
             return cls + Items[AnyOf[object]]
@@ -958,7 +960,7 @@ Examples
     >>> assert isinstance([1,2], Tuple)
     >>> assert Tuple[Integer, String]([1, 'abc'])
     >>> Tuple[Integer, String]._schema.toDict()
-    {'type': 'array', 'items': [{'type': 'integer'}, {'type': 'string'}]}
+    {'items': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, 'type': 'array'}
 
     >>> assert isinstance([1,'1'], Tuple[[Integer, String]])
     >>> assert not isinstance([1,1], Tuple[[Integer, String]])
@@ -974,7 +976,7 @@ class Contains(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
 
 
-class Items(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
+class Items(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
     ...
 
 
