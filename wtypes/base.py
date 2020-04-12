@@ -669,7 +669,7 @@ Examples
     
 
     >>> Dict[{'a': int}]._schema.toDict()
-    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+    {'properties': {'a': {'type': 'integer'}}, 'type': 'object'}
     >>> Dict[{'a': int}]({'a': 1})
     {'a': 1}
 
