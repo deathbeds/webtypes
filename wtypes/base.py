@@ -130,7 +130,7 @@ _type
         global simpleTypes
         cls = super().__new__(cls, name, base, kwargs)
         if "context" in schema:
-            cls._context = schema['context']
+            cls._context = schema.pop('context')
         # Combine metadata across the module resolution order.
         cls._merge_annotations(), cls._merge_schema(), cls._merge_context()
         cls._schema.update(schema)
