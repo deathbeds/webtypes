@@ -1,5 +1,7 @@
 """Compatability for wtyped dataclasses."""
 import wtypes, dataclasses, jsonschema
+
+
 class DataClass(wtypes.Trait, wtypes.base._Object):
     """Validating dataclass type
     
@@ -34,16 +36,15 @@ Examples
         properties = self._schema.get("properties", {})
         (
             wtypes.manager.hook.validate_object(
-                object=object,
-                schema=self._schema.get("properties", {}).get(key, {}),
+                object=object, schema=self._schema.get("properties", {}).get(key, {})
             )
             if key in properties
             else wtypes.manager.hook.validate_object(
-                object={key: object},
-                schema={**self._schema, "required": []},
+                object={key: object}, schema={**self._schema, "required": []}
             )
         )
         super().__setattr__(key, object)
+
 
 # ## Configuration classes
 

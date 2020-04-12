@@ -8,6 +8,7 @@
 
 import wtypes, inspect, contextlib, functools, typing
 
+
 class spec:
     @wtypes.specification
     def dlink(this, source, that, target, callable):
@@ -17,16 +18,19 @@ class spec:
     def link(this, source, that, target):
         """"""
 
+
 def get_jawn(thing, key, object):
     if isinstance(thing, typing.Mapping):
         return thing.get(key, object)
     return getattr(thing, key, object)
+
 
 def set_jawn(thing, key, object):
     if isinstance(thing, typing.Mapping):
         thing[key] = object
     else:
         setattr(thing, key, object)
+
 
 class spec_impl:
     def __enter__(self):
@@ -35,9 +39,11 @@ class spec_impl:
     def __exit__(self, *e):
         wtypes.manager.unregister(type(self))
 
+
 class wtypes_impl(spec_impl):
     @wtypes.implementation
     def dlink(this, source, that, target, callable):
+        set_jawn(that, target, get_jawn(this, source, None))
         if issubclass(type(this), wtypes.Trait):
             if this is that and source == target:
                 raise TypeError("""Linking types to themselves causes recursion.""")
@@ -53,8 +59,10 @@ class wtypes_impl(spec_impl):
             this._registered_links[source][id(that)][target] = callable
             return this
 
+
 wtypes.manager.add_hookspecs(spec)
 wtypes.manager.register(wtypes_impl)
+
 
 class Link:
     _registered_links = None
@@ -72,8 +80,12 @@ class Link:
         self._deferred_changed and e == (None, None, None) and self._propagate()
 
     def link(this, source, that, target):
-        wtypes.manager.hook.dlink(this=this, source=source, that=that, target=target, callable=None)
-        wtypes.manager.hook.dlink(this=that, source=target, that=this, target=source, callable=None)
+        wtypes.manager.hook.dlink(
+            this=this, source=source, that=that, target=target, callable=None
+        )
+        wtypes.manager.hook.dlink(
+            this=that, source=target, that=this, target=source, callable=None
+        )
         return this
 
     def dlink(self, source, that, target, callable=None):
@@ -89,7 +101,10 @@ class Link:
         {'a': 14}
 
         """
-        wtypes.manager.hook.dlink(this=self, source=source, that=that, target=target, callable=callable)
+
+        wtypes.manager.hook.dlink(
+            this=self, source=source, that=that, target=target, callable=callable
+        )
         return self
 
     def observe(self, source, callable=None):
@@ -115,7 +130,9 @@ class Link:
                 key = self._deferred_changed.pop(-1)
                 old = self._deferred_prior.pop(key, None)
                 for hash in (
-                    self._registered_links[key] if self._registered_links and key in self._registered_links else []
+                    self._registered_links[key]
+                    if self._registered_links and key in self._registered_links
+                    else []
                 ):
                     thing = self._registered_id[hash]
                     if hash == id(self):
@@ -126,23 +143,38 @@ class Link:
                                     old=old,
                                     object=self,
                                     name=key,
-                                ),
+                                )
                             )
                     else:
                         for to, function in self._registered_links[key][hash].items():
                             if callable(function):
                                 thing.update({to: function(self[key])})
                             else:
-                                if get_jawn(thing, to, None) is not get_jawn(self, key, inspect._empty):
+                                if get_jawn(thing, to, None) is not get_jawn(
+                                    self, key, inspect._empty
+                                ):
                                     set_jawn(thing, to, self[key])
-        self._display_id and self._display_id.update(__import__('IPython').display.JSON(self))
-                                    
+        if self._display_id:
+            import IPython, json
+
+            data, metadata = self._repr_mimebundle_(None, None)
+            self._display_id.update(data, metadata=metadata, raw=True)
+
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        import json
+
+        return {"text/plain": repr(self)}, {}
+
     def _ipython_display_(self):
         import IPython, json
+
+        shell = IPython.get_ipython()
+        data, metadata = self._repr_mimebundle_(None, None)
         if self._display_id:
-            self._display_id.display(IPython.display.JSON(self))
+            self._display_id.display(data, metadata=metadata, raw=True)
         else:
-            self._display_id = IPython.display.display(IPython.display.JSON(self), display_id=True)
+            self._display_id = IPython.display.display(data, raw=True, display_id=True)
+
 
 class _EventedDict(Link):
     def __setitem__(self, key, object):
@@ -160,9 +192,8 @@ class _EventedDict(Link):
             prior = {
                 k: v for k, v in prior.items() if v is not self.get(k, inspect._empty)
             }
-            prior and self._propagate(*prior, **prior)
-
-
+            for k in args:
+                self._propagate(k, **prior)
 
 
 class Bunch(_EventedDict, wtypes.wtypes.Bunch):
@@ -214,20 +245,24 @@ Examples
     
     """
 
+
 class ipywidgets(spec_impl):
     @wtypes.implementation
     def dlink(this, source, that, target, callable):
         import ipywidgets
+
         if isinstance(that, ipywidgets.Widget):
-            this.observe(source, lambda x: setattr(that, target, x['new']))
-            that.observe(lambda x: this.__setitem__(source, x['new']), target)
+            this.observe(source, lambda x: setattr(that, target, x["new"]))
+            that.observe(lambda x: this.__setitem__(source, x["new"]), target)
 
         if isinstance(this, ipywidgets.Widget):
-            this.observe(lambda x: that.__setitem__(target, x['new']), source)
-            that.observe(target, lambda x: setattr(this, source, x['new']))
+            this.observe(lambda x: that.__setitem__(target, x["new"]), source)
+            that.observe(target, lambda x: setattr(this, source, x["new"]))
+
 
 class panel(spec_impl):
     """Not working yet."""
+
     @wtypes.implementation
     def dlink(this, source, that, target, callable):
         def param_wrap(param, that, target):
@@ -236,10 +271,46 @@ class panel(spec_impl):
                     set_jawn(that, target, event.new)
 
         import param
+
         if isinstance(that, param.parameterized.Parameterized):
-            this.observe(source, lambda x: setattr(that, target, x['new']))
+            this.observe(source, lambda x: setattr(that, target, x["new"]))
             that.param.watch(param_wrap(that, this, source), target)
 
         if isinstance(this, param.parameterized.Parameterized):
-            this.param.watch(param_wrap(this, that, target), source )
-            that.observe(target, lambda x: setattr(this, source, x['new']))
+            this.param.watch(param_wrap(this, that, target), source)
+            that.observe(target, lambda x: setattr(this, source, x["new"]))
+
+
+class Namespace(Dict):
+    """An event namespace to visualize track the annotated fields.
+    
+    
+Examples
+--------
+    >>> # evented.Namespace.register()
+    
+    """
+
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        return (
+            {
+                "text/plain": repr(
+                    {
+                        key: self.get(key, None)
+                        for key in self.get("__annotations__", {})
+                    }
+                )
+            },
+            {},
+        )
+
+    @classmethod
+    def register(cls):
+        shell = __import__("IPython").get_ipython()
+        shell.user_ns = cls(shell.user_ns)
+        return shell.user_ns
+
+    @classmethod
+    def unregister(cls):
+        shell = __import__("IPython").get_ipython()
+        shell.user_ns = dict(shell.user_ns)

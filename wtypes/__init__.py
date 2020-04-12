@@ -22,9 +22,12 @@ Todo
 __version__ = "0.0.2"
 
 import pluggy
-specification = pluggy.HookspecMarker('wtypes')
-implementation = pluggy.HookimplMarker('wtypes')
-manager = pluggy.PluginManager('wtypes')
+
+specification = pluggy.HookspecMarker("wtypes")
+implementation = pluggy.HookimplMarker("wtypes")
+manager = pluggy.PluginManager("wtypes")
+
+
 class spec:
     @specification(firstresult=True)
     def validate_type(type):
@@ -33,6 +36,8 @@ class spec:
     @specification(firstresult=True)
     def validate_object(object, schema):
         "A hook to validate types."
+
+
 manager.add_hookspecs(spec)
 del pluggy
 
@@ -41,4 +46,3 @@ from . import base
 from .dataclass import *
 from .string_formats import *
 from . import dataclass, evented, examples
-

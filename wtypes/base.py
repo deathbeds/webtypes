@@ -27,6 +27,7 @@ import functools
 import inspect
 import re
 import typing
+import builtins
 
 import jsonschema
 import munch
@@ -38,24 +39,26 @@ simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes
 ValidationError = jsonschema.ValidationError
 
 import jsonschema, wtypes
+
+
 class _Implementation:
     @wtypes.implementation
     def validate_type(type):
         jsonschema.validate(
             _get_schema_from_typeish(type),
             jsonschema.Draft7Validator.META_SCHEMA,
-            format_checker=jsonschema.draft7_format_checker
+            format_checker=jsonschema.draft7_format_checker,
         )
         return True
 
     @wtypes.implementation
     def validate_object(object, schema):
         jsonschema.validate(
-            object,
-            schema,
-            format_checker=jsonschema.draft7_format_checker
+            object, schema, format_checker=jsonschema.draft7_format_checker
         )
         return True
+
+
 wtypes.manager.register(_Implementation)
 
 
@@ -103,6 +106,7 @@ _type
     The resource type.
 
 """
+
     _schema = None
     _context = {}
 
@@ -117,9 +121,22 @@ _type
         """Merge schema from the module resolution order."""
         schema = munch.Munch()
         for self in reversed(cls.__mro__):
-            schema.update(munch.Munch.fromDict(getattr(self, "_schema", {}) or {}))
-        cls._schema = schema
-        
+            current = getattr(self, "_schema", {})
+            for k, v in current.items():
+                if isinstance(v, list):
+                    if k not in schema:
+                        schema[k] = list()
+                    schema[k] += v
+                elif isinstance(v, dict):
+                    if k not in schema:
+                        schema[k] = dict()
+                    schema[k].update(v)
+                else:
+                    schema[k] = v
+        if "required" in schema:
+            schema["required"] = list(set(schema["required"]))
+        cls._schema.update(schema)
+
     def _merge_context(cls):
         context = munch.Munch()
         for self in cls.__mro__:
@@ -128,14 +145,14 @@ _type
 
     def __new__(cls, name, base, kwargs, **schema):
         global simpleTypes
+        kwargs.update(
+            _context=munch.Munch.fromDict(schema.pop("context", {})),
+            _schema=getattr(cls, "_schema", None) or munch.Munch(),
+        )
+        kwargs["_schema"].update(schema or {})
         cls = super().__new__(cls, name, base, kwargs)
-        if "context" in schema:
-            cls._context = schema.pop('context')
         # Combine metadata across the module resolution order.
         cls._merge_annotations(), cls._merge_schema(), cls._merge_context()
-        cls._schema.update(schema)
-
-
         wtypes.manager.hook.validate_type(type=cls)
         """Validate the proposed schema against the jsonschema schema."""
         return cls
@@ -156,7 +173,10 @@ Returns
 type
     
         """
-        return type(name, (cls,), {"_schema": copy.deepcopy(cls._schema)}, **schema)
+        ctx = (
+            munch.Munch.fromDict(schema.pop("context")) if "context" in schema else None
+        )
+        return type(name, (cls,), {}, **schema)
 
     def __neg__(cls):
         """The Not version of a type."""
@@ -170,7 +190,10 @@ type
         """Add types together"""
         return cls.create(
             _construct_title(cls) + _construct_title(_python_to_wtype(object)),
-            **{**_get_schema_from_typeish(object), 'context': getattr(object, '_context', None)}
+            **{
+                **_get_schema_from_typeish(object),
+                "context": getattr(object, "_context", None),
+            },
         )
 
     def __and__(cls, object):
@@ -235,11 +258,14 @@ class _ContainerType(_ConstType):
 
     def __getitem__(cls, object):
         schema_key = _lower_key(cls.__name__)
-        schema = _get_schema_from_typeish(object)
+        schema = munch.Munch.fromDict(_get_schema_from_typeish(object))
+        if isinstance(schema, (list, tuple)):
+            update_schema = munch.Munch()
+            for value in schema:
+                update_schema.update(value)
+            schema = update_schema
         if isinstance(object, dict):
-            object = {**cls._schema.get(schema_key, {}), **schema}
-        if isinstance(object, tuple):
-            object = cls._schema.get(schema_key, []) + schema
+            schema.update(cls._schema.get(schema_key, {}))
         return cls + Trait.create(schema_key, **{schema_key: schema})
 
 
@@ -260,6 +286,7 @@ The bracketed notebook should differeniate actions on types versus those on obje
             cls.__name__, **{_lower_key(cls.__name__): _get_schema_from_typeish(object)}
         )
 
+
 def _python_to_wtype(object):
     if isinstance(object, typing.Hashable):
         if object == str:
@@ -276,6 +303,8 @@ def _python_to_wtype(object):
             object = Tuple
         elif object == float:
             object = Float
+        elif object == builtins.object:
+            object = Trait
         elif object == None:
             object = None
         elif object == bool:
@@ -296,7 +325,7 @@ def _get_schema_from_typeish(object):
 
 
 def _lower_key(str):
-    return (str[0].lower() + str[1:]).replace('-', '')
+    return (str[0].lower() + str[1:]).replace("-", "")
 
 
 def _object_to_webtype(object):
@@ -360,7 +389,7 @@ object
                 return _object_to_webtype(args[0])(args[0])
         else:
             self = super().__new__(cls, *args, **kwargs)
-            self.__init__(*args, **kwargs)
+            # self.__init__(*args, **kwargs)
             args or cls.validate(self)
         return self
 
@@ -434,7 +463,7 @@ Examples
 # ## Logical Types
 
 
-class Bool(Trait, metaclass=_SchemaMeta):
+class Bool(Trait, metaclass=_SchemaMeta, type="boolean"):
     """Boolean type
         
 Examples
@@ -450,8 +479,6 @@ It is not possible to base class ``bool`` so object creation is customized.
     
 """
 
-    _schema = dict(type="boolean")
-
     def __new__(cls, *args):
         args = cls._resolve_defaults(*args)
         args = args or (bool(),)
@@ -459,7 +486,7 @@ It is not possible to base class ``bool`` so object creation is customized.
         return args[0]
 
 
-class Null(Trait, metaclass=_SchemaMeta):
+class Null(Trait, metaclass=_SchemaMeta, type="null"):
     """nil, none, null type
         
 Examples
@@ -472,8 +499,6 @@ Examples
     https://json-schema.org/understanding-json-schema/reference/null.html
     
 """
-
-    _schema = dict(type="null")
 
     def __new__(cls, *args):
         args = cls._resolve_defaults(*args)
@@ -512,7 +537,7 @@ class _NumericSchema(_SchemaMeta):
         return cls + MultipleOf[object]
 
 
-class Integer(Trait, int, metaclass=_NumericSchema):
+class Integer(Trait, int, metaclass=_NumericSchema, type="integer"):
     """integer type
     
     
@@ -535,10 +560,8 @@ Examples
     
     """
 
-    _schema = dict(type="integer")
 
-
-class Float(Trait, float, metaclass=_NumericSchema):
+class Float(Trait, float, metaclass=_NumericSchema, type="number"):
     """float type
     
     
@@ -563,8 +586,6 @@ Multiples
     https://json-schema.org/understanding-json-schema/reference/numeric.html
     
     """
-
-    _schema = dict(type="number")
 
 
 class MultipleOf(_NoInit, Trait, metaclass=_ConstType):
@@ -605,28 +626,20 @@ class _ObjectSchema(_SchemaMeta):
         return cls + AdditionalProperties[AnyOf[object]]
 
 
-class _Object(metaclass=_ObjectSchema):
+class _Object(metaclass=_ObjectSchema, type="object"):
     """Base class for validating object types."""
 
-    _schema = dict(type="object")
-
-    def __init_subclass__(cls, **kwargs):
-        cls._schema = copy.deepcopy(cls._schema)
-        cls._schema.update(kwargs)
-        if "properties" in cls._schema:
-            cls._schema.properties.update(
-                Properties[cls.__annotations__]._schema.properties
-            )
-        else:
-            cls._schema.update(Properties[cls.__annotations__]._schema)
-        required = []
-        for key in cls.__annotations__:
+    def __init_subclass__(cls, **schema):
+        cls._schema.update(munch.Munch.fromDict(schema))
+        for key, value in cls.__annotations__.items():
+            cls._schema["properties"] = cls._schema.get("properties", munch.Munch())
+            cls._schema["properties"][key] = _get_schema_from_typeish(value)
             if hasattr(cls, key):
-                ...  # cls._schema.properties[key]['default'] = getattr(cls, key)
+                cls._schema["properties"][key]["default"] = getattr(cls, key)
             else:
-                required.append(key)
-        if required:
-            cls._schema["required"] = required
+                cls._schema["required"] = cls._schema.get("required", [])
+                if key not in cls._schema["required"]:
+                    cls._schema["required"].append(key)
 
     @classmethod
     def from_config_file(cls, *object):
@@ -679,14 +692,20 @@ Examples
         """Only test the key being set to avoid invalid state."""
         properties = self._schema.get("properties", {})
         if key in properties:
-            wtypes.manager.hook.validate_object(object=object, schema=self._schema.get("properties", {}).get(key, {}))
+            wtypes.manager.hook.validate_object(
+                object=object, schema=self._schema.get("properties", {}).get(key, {})
+            )
         else:
-            wtypes.manager.hook.validate_object(object={key: object}, schema={**self._schema, "required": []})
+            wtypes.manager.hook.validate_object(
+                object={key: object}, schema={**self._schema, "required": []}
+            )
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
-        args = dict(*args, **kwargs), 
-        wtypes.manager.hook.validate_object(object=args[0], schema={**self._schema, "required": []})
+        args = (dict(*args, **kwargs),)
+        wtypes.manager.hook.validate_object(
+            object=args[0], schema={**self._schema, "required": []}
+        )
         super().update(*args, **kwargs)
 
 
@@ -706,6 +725,7 @@ Examples
     https://pypi.org/project/munch/
     
 """
+
 
 class AdditionalProperties(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     """Additional object properties."""
@@ -758,7 +778,7 @@ class _StringSchema(_SchemaMeta):
     __rlt__ = __rle__ = __ge__ = __gt__
 
 
-class String(Trait, str, metaclass=_StringSchema):
+class String(Trait, str, metaclass=_StringSchema, type="string"):
     """string type.
     
     
@@ -780,8 +800,6 @@ String constraints
     >>> assert not isinstance('a'*100, (2<String)<10)
     """
 
-    _schema = dict(type="string")
-
 
 class MinLength(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
     """Minimum length of a string type."""
@@ -797,6 +815,7 @@ class ContentMediaType(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
 
 class Pattern(Trait, _NoInit, metaclass=_ConstType):
     """A regular expression pattern."""
+
 
 class Format(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
     ...
@@ -827,7 +846,7 @@ class _ListSchema(_SchemaMeta):
     __rlt__ = __rle__ = __ge__ = __gt__
 
 
-class List(Trait, list, metaclass=_ListSchema):
+class List(Trait, list, metaclass=_ListSchema, type="array"):
     """List type
     
     
@@ -855,8 +874,6 @@ Tuple
     >>> assert isinstance([1, '1'], List[Integer, String])
     >>> assert not isinstance([1, {}], List[Integer, String])
     """
-
-    _schema = dict(type="array")
 
     def __new__(cls, *args, **kwargs):
         args = cls._resolve_defaults(*args)
@@ -995,7 +1012,7 @@ See the __neg__ method for symbollic not composition.
 """
 
 
-class AnyOf(Trait, _NoInit, metaclass=_ContainerType):
+class AnyOf(Trait, _NoInit, metaclass=_ConstType):
     """anyOf combined schema.
     
 Examples
@@ -1010,7 +1027,7 @@ Examples
 """
 
 
-class AllOf(Trait, _NoInit, metaclass=_ContainerType):
+class AllOf(Trait, _NoInit, metaclass=_ConstType):
     """allOf combined schema.
     
 Examples
@@ -1025,7 +1042,7 @@ Examples
 """
 
 
-class OneOf(Trait, _NoInit, metaclass=_ContainerType):
+class OneOf(Trait, _NoInit, metaclass=_ConstType):
     """oneOf combined schema.
 
 Examples
@@ -1064,6 +1081,7 @@ class ContentEncoding(
 .. Json schema media:
     https://json-schema.org/understanding-json-schema/reference/non_json_data.html
 """
+
 
 class If(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     """if condition type
