@@ -24,7 +24,7 @@ def generate_strategy_from_type(type):
     Requires hypothesis_jsonschema
     """
     return __import__("hypothesis_jsonschema").from_schema(
-        wtypes.wtypes._get_schema_from_typeish(type)
+        wtypes.base._get_schema_from_typeish(type)
     )
 
 

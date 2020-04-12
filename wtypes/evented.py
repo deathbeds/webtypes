@@ -97,6 +97,7 @@ class Link:
         >>> class d(Dict): a: int
         >>> e, f = d(a=1), d(a=1)
         >>> e.dlink('a', f, 'a', lambda x: 2*x)
+        {'a': 1}
         >>> e['a'] = 7
         >>> f
         {'a': 14}
