@@ -683,7 +683,10 @@ Examples
             args = cls._resolve_defaults()
         else:
             args = (dict(*args, **kwargs),)
-        return super().__new__(cls, *args)
+
+        self = super().__new__(cls, *args)
+        self.__init__(*args)
+        return self
 
     def _validate(self):
         type(self).validate(self)
