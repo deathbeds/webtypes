@@ -32,7 +32,7 @@ class Link:
         
     Examples
     --------
-        >>> class d(evented.Dict): a: int
+        >>> class d(Dict): a: int
         >>> e, f = d(a=1), d(a=1)
         >>> e.dlink('a', f, 'a', lambda x: 2*x)
         >>> e['a'] = 7
@@ -127,9 +127,9 @@ class Bunch(_EventedDict, wtypes.wtypes.Bunch):
 Examples
 --------
 
-    >>> e, f = EventedBunch(), EventedBunch()
+    >>> e, f = Bunch(), Bunch()
     >>> e.link('a', f, 'b')
-    Evented({})
+    Bunch({})
     >>> e['a'] = 1
     >>> f.toDict()
     {'b': 1}
@@ -139,9 +139,9 @@ Examples
     
     >>> f['b'] = 2
     >>> assert e['a'] == f['b']
-    >>> e = EventedBunch().observe('a', print)
+    >>> e = Bunch().observe('a', print)
     >>> e['a'] = 2
-    EventedBunch({'a': 2}) {'new': 2, 'old': None, 'object': EventedBunch({'a': 2}), 'name': 'a'}
+    Bunch({'a': 2}) {'new': 2, 'old': None, 'object': Bunch({'a': 2}), 'name': 'a'}
     
     """
 
@@ -152,9 +152,9 @@ class Dict(_EventedDict, wtypes.wtypes.Dict):
 Examples
 --------
 
-    >>> e, f = EventedDict(), EventedDict()
+    >>> e, f = Dict(), Dict()
     >>> e.link('a', f, 'b')
-    Evented({})
+    Dict({})
     >>> e['a'] = 1
     >>> f.toDict()
     {'b': 1}
@@ -164,8 +164,8 @@ Examples
     
     >>> f['b'] = 2
     >>> assert e['a'] == f['b']
-    >>> e = EventedDict().observe('a', print)
+    >>> e = Dict().observe('a', print)
     >>> e['a'] = 2
-    EventedDict({'a': 2}) {'new': 2, 'old': None, 'object': EventedDict({'a': 2}), 'name': 'a'}
+    Dict({'a': 2}) {'new': 2, 'old': None, 'object': Dict({'a': 2}), 'name': 'a'}
     
     """
