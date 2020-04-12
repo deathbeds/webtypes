@@ -965,8 +965,8 @@ Examples
     >>> Tuple[Integer, String]._schema.toDict()
     {'items': [{'type': 'integer'}, {'type': 'string'}], 'type': 'array'}
 
-    >>> assert isinstance([1,'1'], Tuple[[Integer, String]])
-    >>> assert not isinstance([1,1], Tuple[[Integer, String]])
+    >>> assert isinstance([1,'1'], Tuple[Integer, String])
+    >>> assert not isinstance([1,1], Tuple[Integer, String])
     
     """
 
