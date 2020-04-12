@@ -87,7 +87,7 @@ _type
 
     _meta_schema = jsonschema.Draft7Validator.META_SCHEMA
     _schema = None
-    _type = "http://json-schema.org/draft-07/schema#/properties/"
+    _context = {}
 
     def _merge_annotations(cls):
         """Merge annotations from the module resolution order."""
@@ -102,14 +102,20 @@ _type
         for self in reversed(cls.__mro__):
             schema.update(munch.Munch.fromDict(getattr(self, "_schema", {}) or {}))
         cls._schema = schema
+        
+    def _merge_context(cls):
+        context = munch.Munch()
+        for self in cls.__mro__:
+            context.update(munch.Munch.fromDict(getattr(self, "_context", {}) or {}))
+        cls._context = context
 
     def __new__(cls, name, base, kwargs, **schema):
         global simpleTypes
-
         cls = super().__new__(cls, name, base, kwargs)
-        cls._type = schema.pop("type", None) or cls._type
+        if "context" in schema:
+            cls._context = schema['context']
         # Combine metadata across the module resolution order.
-        cls._merge_annotations(), cls._merge_schema()
+        cls._merge_annotations(), cls._merge_schema(), cls._merge_context()
         cls._schema.update(schema)
 
         jsonschema.validate(
@@ -150,7 +156,7 @@ type
         """Add types together"""
         return cls.create(
             _construct_title(cls) + _construct_title(_python_to_wtype(object)),
-            **_get_schema_from_typeish(object),
+            **{**_get_schema_from_typeish(object), 'context': getattr(object, '_context', None)}
         )
 
     def __and__(cls, object):
@@ -225,6 +231,23 @@ class _ContainerType(_ConstType):
         return cls + Trait.create(schema_key, **{schema_key: schema})
 
 
+class _ContextType(_SchemaMeta):
+    """Update contextual type features.
+            
+Note
+----
+The bracketed notebook should differeniate actions on types versus those on objects.
+"""
+
+    def __getitem__(cls, object):
+        """start rdf stuff."""
+        object = _get_schema_from_typeish(object)
+        if isinstance(object, tuple):
+            object = list(object)
+        return cls.create(
+            cls.__name__, **{_lower_key(cls.__name__): _get_schema_from_typeish(object)}
+        )
+
 def _python_to_wtype(object):
     if isinstance(object, typing.Hashable):
         if object == str:
@@ -261,7 +284,7 @@ def _get_schema_from_typeish(object):
 
 
 def _lower_key(str):
-    return str[0].lower() + str[1:]
+    return (str[0].lower() + str[1:]).replace('-', '')
 
 
 def _object_to_webtype(object):
@@ -296,7 +319,7 @@ class Trait(metaclass=_SchemaMeta):
     """
 
     _schema = None
-    _type = "http://www.w3.org/2000/01/rdf-schema#Resource"
+    _context = None
 
     def __new__(cls, *args, **kwargs):
         """__new__ validates an object against the type schema and dispatches different values in return.
@@ -326,7 +349,7 @@ object
         else:
             self = super().__new__(cls, *args, **kwargs)
             self.__init__(*args, **kwargs)
-        args or cls.validate(self)
+            args or cls.validate(self)
         return self
 
     @classmethod
@@ -631,7 +654,7 @@ Examples
     """
 
     def __new__(cls, *args, **kwargs):
-        if not (args or kwargs):
+        if not args and not kwargs:
             args = cls._resolve_defaults()
         else:
             args = (dict(*args, **kwargs),)
@@ -1029,11 +1052,6 @@ Examples
     """
 
 
-# ## String Formats
-
-_formats = "color date-time time date email idn-email hostname idn-hostname ipv4 ipv6 uri uri-reference iri iri-reference uri-template json-pointer relative-json-pointer regex".split()
-
-
 class ContentEncoding(
     Enum["7bit 8bit binary quoted-printable base64".split()], _NoInit, _NoTitle
 ):
@@ -1042,17 +1060,6 @@ class ContentEncoding(
 .. Json schema media:
     https://json-schema.org/understanding-json-schema/reference/non_json_data.html
 """
-
-
-class Format(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
-    ...
-
-
-for key in _formats:
-    locals()[key.capitalize()] = String + Format[key]
-Regex.compile = re.compile
-del key
-
 
 class If(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     """if condition type
@@ -1068,11 +1075,3 @@ class Then(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
 
 class Else(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     """else condition type"""
-
-
-
-# ## Configuration classes
-
-
-class Configurable(DataClass):
-    """A configurable classs that is create with dataclass syntax."""

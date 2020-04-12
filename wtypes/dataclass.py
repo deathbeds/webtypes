@@ -1,6 +1,6 @@
 """Compatability for wtyped dataclasses."""
 import wtypes, dataclasses, jsonschema
-class DataClass(wtypes.wtypes.Trait, wtypes.wtypes._Object):
+class DataClass(wtypes.Trait, wtypes.base._Object):
     """Validating dataclass type
     
 Examples
@@ -46,3 +46,9 @@ Examples
             )
         )
         super().__setattr__(key, object)
+
+# ## Configuration classes
+
+
+class Configurable(DataClass):
+    """A configurable classs that is create with dataclass syntax."""

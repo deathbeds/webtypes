@@ -2,4 +2,7 @@
 
 Note
 ----
-Requires rdflib"""
+Requires rdflib
+
+These are actions based on the _context  of the types.
+"""

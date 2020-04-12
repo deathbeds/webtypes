@@ -28,6 +28,8 @@ class Link:
         return this
 
     def dlink(self, source, that, target, callable=None):
+        if self is that and source == 'target':
+            raise TypeError("""Linking types to themselves causes recursion.""")
         self._registered_links = self._registered_links or {}
         self._registered_id = self._registered_id or {}
         self._registered_links[source] = self._registered_links.get(source, {})

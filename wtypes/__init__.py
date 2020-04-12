@@ -20,7 +20,8 @@ Todo
    https://json-schema.org/
 """
 __version__ = "0.0.2"
-from .wtypes import *
+from .base import *
+from . import base
 from .dataclass import *
-from . import evented
-from . import examples
+from .string_formats import *
+from . import dataclass, evented, examples 
