@@ -718,7 +718,7 @@ Examples
 --------
 
     >>> Bunch[{'a': int}]._schema.toDict()
-     {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
+    {'type': 'object', 'properties': {'a': {'type': 'integer'}}}
     >>> Bunch[{'a': int}]({'a': 1}).toDict()
     {'a': 1}
 
