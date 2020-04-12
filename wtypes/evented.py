@@ -242,7 +242,7 @@ Examples
     >>> assert e['a'] == f['b']
     >>> e = Dict().observe('a', print)
     >>> e['a'] = 2
-    {'new': 2, 'old': None, 'object': Dict({'a': 2}), 'name': 'a'}
+    {'new': 2, 'old': None, 'object': {'a': 2}, 'name': 'a'}
     
     """
 
