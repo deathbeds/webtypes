@@ -30,11 +30,33 @@ import typing
 
 import jsonschema
 import munch
+import wtypes
 
 simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes"][
     "enum"
 ]
 ValidationError = jsonschema.ValidationError
+
+import jsonschema, wtypes
+class _Implementation:
+    @wtypes.implementation
+    def validate_type(type):
+        jsonschema.validate(
+            _get_schema_from_typeish(type),
+            jsonschema.Draft7Validator.META_SCHEMA,
+            format_checker=jsonschema.draft7_format_checker
+        )
+        return True
+
+    @wtypes.implementation
+    def validate_object(object, schema):
+        jsonschema.validate(
+            object,
+            schema,
+            format_checker=jsonschema.draft7_format_checker
+        )
+        return True
+wtypes.manager.register(_Implementation)
 
 
 def istype(object, cls):
@@ -74,9 +96,6 @@ Types cannot be generated with invalid schema.
 
 Attributes
 ----------
-_meta_schema : dict
-    The schema the type system validates against.
-    
 _schema : dict
     The schema the object validates against.
 
@@ -84,8 +103,6 @@ _type
     The resource type.
 
 """
-
-    _meta_schema = jsonschema.Draft7Validator.META_SCHEMA
     _schema = None
     _context = {}
 
@@ -118,11 +135,8 @@ _type
         cls._merge_annotations(), cls._merge_schema(), cls._merge_context()
         cls._schema.update(schema)
 
-        jsonschema.validate(
-            cls._schema,
-            cls._meta_schema,
-            format_checker=jsonschema.draft7_format_checker,
-        )
+
+        wtypes.manager.hook.validate_type(type=cls)
         """Validate the proposed schema against the jsonschema schema."""
         return cls
 
@@ -190,9 +204,7 @@ jsonschema.ValidationError
     The ``jsonschema`` module validation throws an exception on failure,
     otherwise the returns a None type.
 """
-        jsonschema.validate(
-            object, cls._schema, format_checker=jsonschema.draft7_format_checker
-        )
+        wtypes.manager.hook.validate_object(object=object, schema=cls._schema)
 
     def __instancecheck__(cls, object):
         try:
@@ -667,25 +679,14 @@ Examples
         """Only test the key being set to avoid invalid state."""
         properties = self._schema.get("properties", {})
         if key in properties:
-            jsonschema.validate(
-                object,
-                self._schema.get("properties", {}).get(key, {}),
-                format_checker=jsonschema.draft7_format_checker,
-            )
+            wtypes.manager.hook.validate_object(object=object, schema=self._schema.get("properties", {}).get(key, {}))
         else:
-            jsonschema.validate(
-                {key: object},
-                {**self._schema, "required": []},
-                format_checker=jsonschema.draft7_format_checker,
-            )
+            wtypes.manager.hook.validate_object(object={key: object}, schema={**self._schema, "required": []})
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
-        jsonschema.validate(
-            dict(*args, **kwargs),
-            {**self._schema, "required": []},
-            format_checker=jsonschema.draft7_format_checker,
-        )
+        args = dict(*args, **kwargs), 
+        wtypes.manager.hook.validate_object(object=args[0], schema={**self._schema, "required": []})
         super().update(*args, **kwargs)
 
 
