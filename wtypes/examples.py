@@ -7,7 +7,7 @@ def generate_strategy_from_object(*object):
     builder = genson.SchemaBuilder()
     for object in object:
         if isinstance(object, type):
-            builder.add_schema(wtypes.wtypes._get_schema_from_typeish(object))
+            builder.add_schema(wtypes.base._get_schema_from_typeish(object))
         else:
             builder.add_object(object)
 

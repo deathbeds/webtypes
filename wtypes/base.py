@@ -960,7 +960,7 @@ Examples
     >>> assert isinstance([1,2], Tuple)
     >>> assert Tuple[Integer, String]([1, 'abc'])
     >>> Tuple[Integer, String]._schema.toDict()
-    {'items': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, 'type': 'array'}
+    {'items': [{'type': 'integer'}, {'type': 'string'}], 'type': 'array'}
 
     >>> assert isinstance([1,'1'], Tuple[[Integer, String]])
     >>> assert not isinstance([1,1], Tuple[[Integer, String]])
