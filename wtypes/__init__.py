@@ -23,6 +23,12 @@ __version__ = "0.0.2"
 
 import pluggy
 
+from . import base, dataclass, evented, examples, python_types
+from .base import *
+from .dataclass import *
+from .python_types import *
+from .string_formats import *
+
 specification = pluggy.HookspecMarker("wtypes")
 implementation = pluggy.HookimplMarker("wtypes")
 manager = pluggy.PluginManager("wtypes")
@@ -40,9 +46,3 @@ class spec:
 
 manager.add_hookspecs(spec)
 del pluggy
-
-from .base import *
-from . import base
-from .dataclass import *
-from .string_formats import *
-from . import dataclass, evented, examples

@@ -6,7 +6,12 @@
 
 """
 
-import wtypes, inspect, contextlib, functools, typing
+import contextlib
+import functools
+import inspect
+import typing
+
+import wtypes
 
 
 class spec:
@@ -115,10 +120,12 @@ class Link:
         self._registered_id = self._registered_id or {}
         self._registered_links[source] = self._registered_links.get(source, {})
         if id(self) not in self._registered_links[source]:
-            self._registered_links[source][id(self)] = []
+            self._registered_links[source][id(self)] = {}
         if id(self) not in self._registered_id:
             self._registered_id[id(self)] = self
-        self._registered_links[source][id(self)].append(callable)
+        if source not in self._registered_links[source][id(self)]:
+            self._registered_links[source][id(self)][source] = []
+        self._registered_links[source][id(self)][source].append(callable)
         return self
 
     def _propagate(self, *changed, **prior):
@@ -137,25 +144,28 @@ class Link:
                     else []
                 ):
                     thing = self._registered_id[hash]
-                    if hash == id(self):
-                        for func in self._registered_links[key][hash]:
-                            func(
-                                dict(
-                                    new=self.get(key, None),
-                                    old=old,
-                                    object=self,
-                                    name=key,
+                    for k, v in self._registered_links[key][hash].items():
+                        if k == key and hash == id(self):
+                            for func in v:
+                                func(
+                                    dict(
+                                        new=self.get(key, None),
+                                        old=old,
+                                        object=self,
+                                        name=key,
+                                    )
                                 )
-                            )
-                    else:
-                        for to, function in self._registered_links[key][hash].items():
-                            if callable(function):
-                                thing.update({to: function(self[key])})
-                            else:
-                                if get_jawn(thing, to, None) is not get_jawn(
-                                    self, key, inspect._empty
-                                ):
-                                    set_jawn(thing, to, self[key])
+                        else:
+                            for to, function in self._registered_links[key][
+                                hash
+                            ].items():
+                                if callable(function):
+                                    thing.update({to: function(self[key])})
+                                else:
+                                    if get_jawn(thing, to, None) is not get_jawn(
+                                        self, key, inspect._empty
+                                    ):
+                                        set_jawn(thing, to, self[key])
         if self._display_id:
             import IPython, json
 

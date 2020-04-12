@@ -1,4 +1,7 @@
-import wtypes, re, functools
+import functools
+import re
+
+import wtypes
 
 
 class Color(wtypes.String, format="color"):
