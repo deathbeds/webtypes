@@ -10,7 +10,7 @@ Examples
 
     >>> class q(DataClass): a: int
     >>> q._schema.toDict()
-    {'properties': {'a': {'type': 'integer'}}, 'required': ['a'], 'type': 'object'}
+    {'type': 'object', 'properties': {'a': {'type': 'integer'}}, 'required': ['a']}
 
     >>> q(a=10)
     q(a=10)
