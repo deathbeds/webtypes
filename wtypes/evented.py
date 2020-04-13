@@ -83,7 +83,6 @@ class Link:
 
     def __exit__(self, *e):
         self._depth -= 1
-        self._deferred_changed and e == (None, None, None) and self._propagate()
 
     def link(this, source, that, target):
         wtypes.manager.hook.dlink(
@@ -132,40 +131,41 @@ class Link:
         self._deferred_changed = list(self._deferred_changed or changed)
         self._deferred_prior = {**prior, **(self._deferred_prior or {})}
 
-        if self._depth > 0:
-            return
-        with self:
-            while self._deferred_changed:
-                key = self._deferred_changed.pop(-1)
-                old = self._deferred_prior.pop(key, None)
-                for hash in (
-                    self._registered_links[key]
-                    if self._registered_links and key in self._registered_links
-                    else []
-                ):
-                    thing = self._registered_id[hash]
-                    for k, v in self._registered_links[key][hash].items():
-                        if k == key and hash == id(self):
-                            for func in v:
-                                func(
-                                    dict(
-                                        new=self.get(key, None),
-                                        old=old,
-                                        object=self,
-                                        name=key,
+        if self._depth == 0:
+            with self:
+                while self._deferred_changed:
+                    key = self._deferred_changed.pop(-1)
+                    old = (self._deferred_prior or {}).pop(key, None)
+                    for hash in (
+                        self._registered_links[key]
+                        if self._registered_links and key in self._registered_links
+                        else []
+                    ):
+                        thing = self._registered_id[hash]
+                        for k, v in self._registered_links[key][hash].items():
+                            if k == key and hash == id(self):
+                                for func in v:
+                                    func(
+                                        dict(
+                                            new=self.get(key, None),
+                                            old=old,
+                                            object=self,
+                                            name=key,
+                                        )
                                     )
-                                )
-                        else:
-                            for to, function in self._registered_links[key][
-                                hash
-                            ].items():
-                                if callable(function):
-                                    thing.update({to: function(self[key])})
-                                else:
-                                    if get_jawn(thing, to, None) is not get_jawn(
-                                        self, key, inspect._empty
-                                    ):
-                                        set_jawn(thing, to, self[key])
+                            else:
+                                for to, function in self._registered_links[key][
+                                    hash
+                                ].items():
+                                    if callable(function):
+                                        thing.update({to: function(self[key])})
+                                    else:
+                                        if get_jawn(thing, to, None) is not get_jawn(
+                                            self, key, inspect._empty
+                                        ):
+                                            set_jawn(thing, to, self[key])
+
+    def _update_display(self):
         if self._display_id:
             import IPython, json
 
@@ -173,8 +173,6 @@ class Link:
             self._display_id.update(data, metadata=metadata, raw=True)
 
     def _repr_mimebundle_(self, include=None, exclude=None):
-        import json
-
         return {"text/plain": repr(self)}, {}
 
     def _ipython_display_(self):
@@ -188,7 +186,32 @@ class Link:
             self._display_id = IPython.display.display(data, raw=True, display_id=True)
 
 
-class _EventedDict(Link):
+class _EventedObject(Link):
+    def __exit__(self, *e):
+        super().__exit__(*e)
+        self._deferred_changed and e == (None, None, None) and self._propagate()
+        self._update_display()
+
+
+class _EventedDataclass(_EventedObject):
+    def __setattr__(self, key, object):
+        if key in set(sum(map(dir, type(self).__mro__), [])):
+            return super().__setattr__(key, object)
+        with self:
+            prior = getattr(self, key, None)
+            super().__setattr__(key, object)
+            if object is not prior:
+                self._propagate(key, **{key: prior})
+
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        return {"text/plain": str(self)}, {}
+
+
+class DataClass(_EventedDataclass, wtypes.DataClass):
+    ...
+
+
+class _EventedDict(_EventedObject):
     def __setitem__(self, key, object):
         with self:
             prior = self.get(key, None)
@@ -206,6 +229,32 @@ class _EventedDict(Link):
             }
             for k in args:
                 self._propagate(k, **prior)
+
+
+class _EventedList(Link):
+    def __exit__(self, *e):
+        super().__exit__(*e)
+        self._update_display()
+
+    def __setitem__(self, key, object):
+        with self:
+            super().__setitem__(key, object)
+
+    def append(self, object):
+        with self:
+            super().append(object)
+
+    def extend(self, object):
+        with self:
+            super().extend(object)
+
+    def pop(self, index=-1, default=None):
+        with self:
+            return super().pop(index, default)
+
+
+class List(_EventedList, wtypes.wtypes.List):
+    ...
 
 
 class Bunch(_EventedDict, wtypes.wtypes.Bunch):

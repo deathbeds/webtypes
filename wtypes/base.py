@@ -963,6 +963,7 @@ Tuple
         value = super().pop(index, default)
         try:
             type(self).validate(self)
+            return value
         except ValidationError:
             self.insert(index, value)
 
