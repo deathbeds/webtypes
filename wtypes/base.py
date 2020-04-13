@@ -275,12 +275,9 @@ The bracketed notebook should differeniate actions on types versus those on obje
 """
 
     def __getitem__(cls, object):
-        object = _get_schema_from_typeish(object)
         if isinstance(object, tuple):
             object = list(object)
-        return cls.create(
-            cls.__name__, **{_lower_key(cls.__name__): _get_schema_from_typeish(object)}
-        )
+        return cls.create(cls.__name__, **{_lower_key(cls.__name__): object})
 
 
 class _ContainerType(_ConstType):
@@ -288,14 +285,14 @@ class _ContainerType(_ConstType):
 
     def __getitem__(cls, object):
         schema_key = _lower_key(cls.__name__)
-        schema = munch.Munch.fromDict(_get_schema_from_typeish(object))
-        if isinstance(schema, (list, tuple)):
-            update_schema = munch.Munch()
-            for value in schema:
-                update_schema.update(value)
-            schema = update_schema
+        schema = munch.Munch()
         if isinstance(object, dict):
-            schema.update(cls._schema.get(schema_key, {}))
+            schema.update(_get_schema_from_typeish(object))
+        else:
+            if not isinstance(object, tuple):
+                object = (object,)
+            if isinstance(object, (list, tuple)):
+                schema = [_get_schema_from_typeish(value) for value in object]
         return cls + Trait.create(schema_key, **{schema_key: schema})
 
 
@@ -339,6 +336,8 @@ def _python_to_wtype(object):
             object = None
         elif object == bool:
             object = Bool
+        elif object == set:
+            object = Unique
     return object
 
 
@@ -353,7 +352,7 @@ def _get_schema_from_typeish(object):
     object = _python_to_wtype(object)
     if hasattr(object, "_schema"):
         return object._schema
-    return munch.Munch.fromDict(object)
+    return {}
 
 
 def _lower_key(str):
@@ -433,14 +432,27 @@ object
             if "default" in cls._schema:
                 return (cls._schema.default,)
             elif "properties" in cls._schema:
-                return (
-                    {
-                        k: v["default"]
-                        for k, v in cls._schema["properties"].items()
-                        if "default" in v
-                    },
-                )
+                defaults = {}
+                for k, v in cls._schema["properties"].items():
+                    object = get_jawn(cls, k, None)
+                    if isinstance(object, dataclasses.Field):
+                        if not isinstance(object.default, dataclasses._MISSING_TYPE):
+                            defaults[k] = object.default
+                        elif not isinstance(
+                            object.default_factory, dataclasses._MISSING_TYPE
+                        ):
+                            defaults[k] = object.default_factory()
+                    elif "default" in v:
+                        defaults[k] = v["default"]
+
+                return (defaults,)
         return args
+
+
+def get_jawn(thing, key, object):
+    if isinstance(thing, typing.Mapping):
+        return thing.get(key, object)
+    return getattr(thing, key, object)
 
 
 class Description(_NoInit, Trait, _NoTitle, metaclass=_ConstType):
@@ -656,7 +668,7 @@ class _ObjectSchema(_SchemaMeta):
             return cls + Properties[object]
         if not isinstance(object, tuple):
             object = (object,)
-        return cls + AdditionalProperties[AnyOf[object]]
+        return cls + AdditionalProperties[AnyOf[object,]]
 
 
 class _Object(metaclass=_ObjectSchema, type="object"):
@@ -669,7 +681,9 @@ class _Object(metaclass=_ObjectSchema, type="object"):
                 cls._schema.get("properties", None) or munch.Munch()
             )
             cls._schema["properties"][key] = _get_schema_from_typeish(value)
-            if hasattr(cls, key):
+            if hasattr(cls, key) and not isinstance(
+                getattr(cls, key), dataclasses.Field
+            ):
                 cls._schema.properties[key].default = getattr(cls, key)
             else:
                 cls._schema["required"] = cls._schema.get("required", [])
@@ -715,13 +729,6 @@ Examples
 
     def __new__(cls, *args, **kwargs):
         defaults = cls._resolve_defaults()
-        for key in dir(cls):
-            object = getattr(cls, key)
-            if isinstance(getattr(cls, key), dataclasses.Field):
-                if object.default != dataclasses._MISSING_TYPE:
-                    defaults[key] = object.default
-                elif object.default_factory != dataclasses._MISSING_TYPE:
-                    defaults[key] = object.default_factory()
         args = ({**(defaults[0] if defaults else {}), **dict(*args, **kwargs)},)
 
         self = super().__new__(cls, *args)
@@ -876,7 +883,7 @@ class _ListSchema(_SchemaMeta):
                 object = (object,)
             return cls + Items[list(object)]
         elif isinstance(object, tuple):
-            return cls + Items[AnyOf[object]]
+            return cls + Items[AnyOf[object,]]
         return cls + Items[object]
 
     def __gt__(cls, object):
@@ -956,23 +963,39 @@ Tuple
     def append(self, object):
         self._verify_item(object, len(self) + 1)
         super().append(object)
+        try:
+            type(self).validate(self)
+        except jsonschema.ValidationError as e:
+            self.pop(-1)
+            raise e
 
     def insert(self, id, object):
         self._verify_item(object, id)
-        super().insert(id, object)
+        try:
+            super().insert(id, object)
+        except jsonschema.ValidationError as e:
+            self.pop(id)
+            raise e
 
     def extend(self, object):
-        id = slice(len(self), len(self) + 3)
+        id = slice(len(self), len(self) + len(object))
         self._verify_item(object, id)
         super().extend(object)
+        try:
+            type(self).validate(self)
+        except ValidationError as e:
+            for i in range(len(object)):
+                self.pop(-1)
+            raise e
 
-    def pop(self, index=-1, default=None):
-        value = super().pop(index, default)
+    def pop(self, index=-1):
+        value = super().pop(index)
         try:
             type(self).validate(self)
             return value
-        except ValidationError:
+        except ValidationError as e:
             self.insert(index, value)
+            raise e
 
 
 class Unique(List, uniqueItems=True):
@@ -1021,7 +1044,7 @@ class Contains(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
 
 
-class Items(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
+class Items(Trait, _NoInit, _NoTitle, metaclass=_ContainerType):
     ...
 
 
@@ -1059,7 +1082,7 @@ See the __neg__ method for symbollic not composition.
 """
 
 
-class AnyOf(Trait, _NoInit, metaclass=_ConstType):
+class AnyOf(Trait, _NoInit, metaclass=_ContainerType):
     """anyOf combined schema.
     
 Examples
@@ -1074,7 +1097,7 @@ Examples
 """
 
 
-class AllOf(Trait, _NoInit, metaclass=_ConstType):
+class AllOf(Trait, _NoInit, metaclass=_ContainerType):
     """allOf combined schema.
     
 Examples
@@ -1089,7 +1112,7 @@ Examples
 """
 
 
-class OneOf(Trait, _NoInit, metaclass=_ConstType):
+class OneOf(Trait, _NoInit, metaclass=_ContainerType):
     """oneOf combined schema.
 
 Examples

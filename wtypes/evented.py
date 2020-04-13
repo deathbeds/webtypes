@@ -197,9 +197,6 @@ class Link:
         for parent in self._registered_parents or []:
             parent._update_display()
 
-    def _repr_mimebundle_(self, include=None, exclude=None):
-        return {"text/plain": repr(self)}, {}
-
     def _ipython_display_(self):
         import IPython, json
 
@@ -284,6 +281,7 @@ class _EventedList(Link):
         self._depth -= 1
         if not self._depth:
             self._update_display()
+        e != (None, None, None) and self._update_display()
 
     def __setitem__(self, key, object):
         if isinstance(key, str):
@@ -302,9 +300,9 @@ class _EventedList(Link):
             super().extend(object)
             self._link_parent(object)
 
-    def pop(self, index=-1, default=None):
+    def pop(self, index=-1):
         with self:
-            return super().pop(index, default)
+            return super().pop(index)
 
     def observe(self, callable=None):
         """The callable has to define a signature."""
