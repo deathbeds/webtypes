@@ -19,16 +19,24 @@ class _ForwardSchema(wtypes.base._ContextMeta):
         cls._merge_schema()
         return cls
 
+    def __add__(cls, object):
+        """Add types together"""
+        return type(cls.__name__, (cls, object), {})
+
     def _merge_schema(cls):
         types, args, kwargs = [], [], {}
-        for self in reversed(cls.__mro__):
-            if not hasattr(self, "_schema"):
-                continue
-            if isinstance(self._schema, dict):
-                continue
-            types.append(self._schema)
-            args.extend(list(self._schema_args or []))
-            kwargs.update(self._schema_kwargs or {})
+        for object in reversed(cls.__mro__):
+            if hasattr(object, "_schema_args"):
+                args.extend(list(object._schema_args or []))
+            if hasattr(object, "_schema_kwargs"):
+                kwargs.update(object._schema_kwargs or {})
+            if hasattr(object, "_schema"):
+                if not object._schema:
+                    continue
+                if isinstance(object._schema, dict):
+                    continue
+                types.append(object._schema)
+
         cls._schema = types and types[0] or None
         cls._schema_args = args or None
         cls._schema_kwargs = kwargs or None
@@ -73,11 +81,31 @@ class Keywords(wtypes.base._NoInit, wtypes.base._NoTitle, metaclass=_ArgumentSch
 
 
 class Forward(metaclass=_ForwardSchema):
+    """Create type using objects or forward references.
+
+Examples
+--------
+
+    >>> assert Forward['builtins.range']() is range
+    
+    
+    """
+
     def __new__(cls):
         return cls.eval()
 
 
 class Class(Forward):
+    """Create type using objects or forward references.
+
+Examples
+--------
+
+    >>> assert isinstance(range, Class['builtins.range'])
+
+    
+    """
+
     def __new__(cls):
         object = super().__new__()
         if isinstance(object, tuple):
@@ -91,8 +119,20 @@ class Class(Forward):
 
 
 class Instance(Forward):
+    """Create an instance of a type using objects or forward references.
+
+Examples
+--------
+
+    >>> assert (Instance[range] + Args[10, 20])() == range(10, 20)
+    >>> assert (Instance['builtins.range'] + Args[10, 20])() == range(10, 20)
+    >>> assert isinstance(range(10), Instance['builtins.range'])
+    
+    
+    """
+
     def __new__(cls, *args, **kwargs):
-        args = (cls._schema_args or tuple()) + args
+        args = tuple(cls._schema_args or tuple()) + args
         kwargs = {**(cls._schema_kwargs or dict()), **kwargs}
         return super().__new__(cls)(*args, **kwargs)
 
