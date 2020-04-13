@@ -663,7 +663,7 @@ class _Object(metaclass=_ObjectSchema, type="object"):
     """Base class for validating object types."""
 
     def __init_subclass__(cls, **schema):
-        cls._schema = cls._schema or munch.Munch()
+        cls._schema = munch.Munch.fromDict(cls._schema or {})
         for key, value in cls.__annotations__.items():
             cls._schema["properties"] = (
                 cls._schema.get("properties", None) or munch.Munch()
@@ -690,7 +690,7 @@ Examples
 
     >>> assert istype(Dict, __import__('collections').abc.MutableMapping)
     >>> assert (Dict + Default[{'b': 'foo'}])() == {'b': 'foo'}
-    >>> assert (Dict + Default[{'b': 'foo'}])({'a': 'bar'}) == {'a': 'bar'}
+    >>> assert (Dict + Default[{'b': 'foo'}])({'a': 'bar'}) == {'b': 'foo', 'a': 'bar'}
 
 
     >>> assert isinstance({}, Dict)
@@ -715,7 +715,7 @@ Examples
 
     def __new__(cls, *args, **kwargs):
         defaults = cls._resolve_defaults()
-        args = ({**defaults[0], **dict(*args, **kwargs)},)
+        args = ({**(defaults[0] if defaults else {}), **dict(*args, **kwargs)},)
 
         self = super().__new__(cls, *args)
         self.__init__(*args)
