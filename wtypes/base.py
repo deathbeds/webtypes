@@ -40,7 +40,6 @@ simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes
 ValidationError = jsonschema.ValidationError
 
 
-
 class _Implementation:
     @wtypes.implementation
     def validate_type(type):
@@ -91,7 +90,84 @@ class _NoInit:
 # ## `webtypes` meta schema
 
 
-class _SchemaMeta(abc.ABCMeta):
+class _ContextMeta(abc.ABCMeta):
+    """Meta operations for the context..
+    
+Attributes
+----------
+_context : dict
+    The schema the object validates against.
+
+"""
+
+    _context = None
+
+    def __new__(cls, name, base, kwargs):
+        kwargs.update(_context=(kwargs.get("_schema") or {}).pop("context", None))
+        cls = super().__new__(cls, name, base, kwargs)
+        cls._merge_context()
+        return cls
+
+    def _merge_context(cls):
+        context = munch.Munch()
+        for self in cls.__mro__:
+            context.update(munch.Munch.fromDict(getattr(self, "_context", {}) or {}))
+        cls._context = context or None
+
+    def __matmul__(cls, object):
+        cls = cls.create(cls.__name__)
+        cls._context = cls._context or munch.Munch()
+        if isinstance(object, dict):
+            cls._context.update(munch.Munch.fromDict(object))
+        elif isinstance(object, (str, list)):
+            if not isinstance(cls._context, list):
+                cls._context = [cls._context]
+            if isinstance(object, str):
+                cls._context = cls._context + [object]
+            else:
+                cls._context = cls._context + list(map(munch.Munch.fromDict, object))
+            cls._context = list(filter(bool, cls._context))
+        return cls
+
+    def validate(cls, object):
+        return True
+
+    def __instancecheck__(cls, object):
+        try:
+            cls.validate(object)
+            return True
+        except:
+            return False
+
+    def create(cls, name: str, **schema):
+        """Create a new schema type.
+
+
+        
+
+Parameters
+----------
+name: str
+    The title of the new type/schema
+**schema: dict
+    Extra features to add include in the schema.
+    
+Returns
+-------
+type
+    
+        """
+        return type(name, (cls,), {}, **schema)
+
+    def __add__(cls, object):
+        """Add types together"""
+        return cls.create(
+            _construct_title(cls) + _construct_title(_python_to_wtype(object)),
+            **(_get_schema_from_typeish(object) or {}),
+        )
+
+
+class _SchemaMeta(_ContextMeta):
     """Meta operations for wtypes.
     
 The ``_SchemaMeta`` ensures that a type's extended schema is validate.
@@ -122,62 +198,31 @@ _type
         schema = munch.Munch()
         for self in reversed(cls.__mro__):
             current = getattr(self, "_schema", {})
-            for k, v in current.items():
-                if isinstance(v, list):
-                    if k not in schema:
-                        schema[k] = list()
-                    schema[k] += v
-                elif isinstance(v, dict):
-                    if k not in schema:
-                        schema[k] = dict()
-                    schema[k].update(v)
-                else:
-                    schema[k] = v
+            if isinstance(current, dict):
+                for k, v in current.items():
+                    if isinstance(v, list):
+                        if k not in schema:
+                            schema[k] = list()
+                        schema[k] += v
+                    elif isinstance(v, dict):
+                        if k not in schema:
+                            schema[k] = dict()
+                        schema[k].update(v)
+                    else:
+                        schema[k] = v
         if "required" in schema:
             schema["required"] = list(set(schema["required"]))
         cls._schema = schema
 
-    def _merge_context(cls):
-        context = munch.Munch()
-        for self in cls.__mro__:
-            context.update(munch.Munch.fromDict(getattr(self, "_context", {}) or {}))
-        cls._context = context
-
     def __new__(cls, name, base, kwargs, **schema):
-        global simpleTypes
-        kwargs.update(
-            _context=munch.Munch.fromDict(schema.pop("context", {})),
-            _schema=getattr(cls, "_schema", None) or munch.Munch(),
-        )
-        kwargs["_schema"].update(schema or {})
+        kwargs.update(_schema=schema or None)
         cls = super().__new__(cls, name, base, kwargs)
         # Combine metadata across the module resolution order.
-        cls._merge_annotations(), cls._merge_schema(), cls._merge_context()
+        cls._merge_annotations(), cls._merge_schema()
         if isinstance(cls._schema, dict):
             wtypes.manager.hook.validate_type(type=cls)
         """Validate the proposed schema against the jsonschema schema."""
         return cls
-
-    def create(cls, name: str, **schema):
-        """Create a new schema type.
-        
-
-Parameters
-----------
-name: str
-    The title of the new type/schema
-**schema: dict
-    Extra features to add include in the schema.
-    
-Returns
--------
-type
-    
-        """
-        ctx = (
-            munch.Munch.fromDict(schema.pop("context")) if "context" in schema else None
-        )
-        return type(name, (cls,), {}, **schema)
 
     def __neg__(cls):
         """The Not version of a type."""
@@ -186,16 +231,6 @@ type
     def __pos__(cls):
         """The type."""
         return cls
-
-    def __add__(cls, object):
-        """Add types together"""
-        return cls.create(
-            _construct_title(cls) + _construct_title(_python_to_wtype(object)),
-            **{
-                **_get_schema_from_typeish(object),
-                "context": getattr(object, "_context", None),
-            },
-        )
 
     def __and__(cls, object):
         """AllOf the conditions"""
@@ -229,12 +264,6 @@ jsonschema.ValidationError
     otherwise the returns a None type.
 """
         wtypes.manager.hook.validate_object(object=object, schema=cls._schema)
-
-    def __instancecheck__(cls, object):
-        try:
-            return cls.validate(object) or True
-        except:
-            return False
 
 
 class _ConstType(_SchemaMeta):
@@ -355,7 +384,9 @@ def _object_to_webtype(object):
 def _construct_title(cls):
     if istype(cls, _NoTitle):
         return ""
-    return cls._schema.get("title", cls.__name__)
+    if isinstance(cls._schema, dict):
+        return cls._schema.get("title", cls.__name__)
+    return cls.__name__
 
 
 class Trait(metaclass=_SchemaMeta):
@@ -632,9 +663,11 @@ class _Object(metaclass=_ObjectSchema, type="object"):
     """Base class for validating object types."""
 
     def __init_subclass__(cls, **schema):
-        cls._schema.update(munch.Munch.fromDict(schema))
+        cls._schema = cls._schema or munch.Munch()
         for key, value in cls.__annotations__.items():
-            cls._schema["properties"] = cls._schema.get("properties", munch.Munch())
+            cls._schema["properties"] = (
+                cls._schema.get("properties", None) or munch.Munch()
+            )
             cls._schema["properties"][key] = _get_schema_from_typeish(value)
             if hasattr(cls, key):
                 cls._schema.properties[key].default = getattr(cls, key)
@@ -681,10 +714,8 @@ Examples
     """
 
     def __new__(cls, *args, **kwargs):
-        if not args and not kwargs:
-            args = cls._resolve_defaults()
-        else:
-            args = (dict(*args, **kwargs),)
+        defaults = cls._resolve_defaults()
+        args = ({**defaults[0], **dict(*args, **kwargs)},)
 
         self = super().__new__(cls, *args)
         self.__init__(*args)
