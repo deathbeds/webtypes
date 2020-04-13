@@ -51,18 +51,16 @@ class wtypes_impl(spec_impl):
         if hasattr(that, target) or isinstance(that, typing.Mapping) and target in that:
             set_jawn(that, target, get_jawn(this, source, None))
         if issubclass(type(this), wtypes.Trait):
-            if this is that and source == target:
-                raise TypeError("""Linking types to themselves causes recursion.""")
             this._registered_links = this._registered_links or {}
             this._registered_id = this._registered_id or {}
             this._registered_links[source] = this._registered_links.get(source, {})
             if id(that) not in this._registered_links[source]:
                 this._registered_links[source][id(that)] = {}
             if target not in this._registered_links[source][id(that)]:
-                this._registered_links[source][id(that)][target] = None
+                this._registered_links[source][id(that)][target] = []
             if id(that) not in this._registered_id:
                 this._registered_id[id(that)] = that
-            this._registered_links[source][id(that)][target] = callable
+            this._registered_links[source][id(that)][target].append(callable)
             return this
 
 
@@ -83,6 +81,9 @@ class Link:
 
     def __exit__(self, *e):
         self._depth -= 1
+        if not self._depth:
+            self._propagate()
+            self._update_display()
 
     def link(this, source, that, target):
         wtypes.manager.hook.dlink(
@@ -115,48 +116,41 @@ class Link:
 
     def observe(self, source, callable=None):
         """The callable has to define a signature."""
-        self._registered_links = self._registered_links or {}
-        self._registered_id = self._registered_id or {}
-        self._registered_links[source] = self._registered_links.get(source, {})
-        if id(self) not in self._registered_links[source]:
-            self._registered_links[source][id(self)] = {}
-        if id(self) not in self._registered_id:
-            self._registered_id[id(self)] = self
-        if source not in self._registered_links[source][id(self)]:
-            self._registered_links[source][id(self)][source] = []
-        self._registered_links[source][id(self)][source].append(callable)
-        return self
+        return self.dlink(source, self, source, callable=callable)
 
     def _propagate(self, *changed, **prior):
         self._deferred_changed = list(self._deferred_changed or changed)
         self._deferred_prior = {**prior, **(self._deferred_prior or {})}
 
         if self._depth == 0:
-            with self:
-                while self._deferred_changed:
-                    key = self._deferred_changed.pop(-1)
-                    old = (self._deferred_prior or {}).pop(key, None)
-                    for hash in (
-                        self._registered_links[key]
-                        if self._registered_links and key in self._registered_links
-                        else []
-                    ):
-                        thing = self._registered_id[hash]
-                        for k, v in self._registered_links[key][hash].items():
-                            if k == key and hash == id(self):
-                                for func in v:
-                                    func(
-                                        dict(
-                                            new=self.get(key, None),
-                                            old=old,
-                                            object=self,
-                                            name=key,
-                                        )
+            while self._deferred_changed:
+                key = self._deferred_changed.pop(-1)
+                old = (self._deferred_prior or {}).pop(key, None)
+                for hash in (
+                    self._registered_links[key]
+                    if self._registered_links and key in self._registered_links
+                    else []
+                ):
+                    thing = self._registered_id[hash]
+                    for k, v in self._registered_links[key][hash].items():
+                        if k == key and hash == id(self):
+                            for func in v:
+                                func(
+                                    dict(
+                                        new=self.get(key, None)
+                                        if hasattr(self, "get")
+                                        else None,
+                                        old=old,
+                                        object=self,
+                                        name=key,
                                     )
-                            else:
-                                for to, function in self._registered_links[key][
-                                    hash
-                                ].items():
+                                )
+                        else:
+                            for to, functions in self._registered_links[key][
+                                hash
+                            ].items():
+                                if functions:
+                                    function = functions[-1]
                                     if callable(function):
                                         thing.update({to: function(self[key])})
                                     else:
@@ -187,21 +181,19 @@ class Link:
 
 
 class _EventedObject(Link):
-    def __exit__(self, *e):
-        super().__exit__(*e)
-        self._deferred_changed and e == (None, None, None) and self._propagate()
-        self._update_display()
+    ...
 
 
 class _EventedDataclass(_EventedObject):
     def __setattr__(self, key, object):
-        if key in set(sum(map(dir, type(self).__mro__), [])):
+        if key in {"_depth", "_deferred_changed", "_deferred_prior"}:
             return super().__setattr__(key, object)
-        with self:
-            prior = getattr(self, key, None)
-            super().__setattr__(key, object)
-            if object is not prior:
-                self._propagate(key, **{key: prior})
+        else:
+            with self:
+                prior = getattr(self, key, None)
+                super().__setattr__(key, object)
+                if object is not prior:
+                    self._propagate(key, **{key: prior})
 
     def _repr_mimebundle_(self, include=None, exclude=None):
         return {"text/plain": str(self)}, {}
@@ -212,6 +204,12 @@ class DataClass(_EventedDataclass, wtypes.DataClass):
 
 
 class _EventedDict(_EventedObject):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for k, v in self.items():
+            if isinstance(v, Link):
+                v.observe(lambda x: self._update_display())
+
     def __setitem__(self, key, object):
         with self:
             prior = self.get(key, None)
@@ -232,9 +230,17 @@ class _EventedDict(_EventedObject):
 
 
 class _EventedList(Link):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for v in self:
+            if isinstance(v, Link):
+                v.observe(lambda x: self._update_display())
+
     def __exit__(self, *e):
-        super().__exit__(*e)
-        self._update_display()
+        self._depth -= 1
+        if not self._depth:
+            self._propagate("")
+            self._update_display()
 
     def __setitem__(self, key, object):
         with self:
@@ -251,6 +257,10 @@ class _EventedList(Link):
     def pop(self, index=-1, default=None):
         with self:
             return super().pop(index, default)
+
+    def observe(self, callable=None):
+        """The callable has to define a signature."""
+        return self.dlink("", self, "", callable=callable)
 
 
 class List(_EventedList, wtypes.wtypes.List):
