@@ -715,6 +715,13 @@ Examples
 
     def __new__(cls, *args, **kwargs):
         defaults = cls._resolve_defaults()
+        for key in dir(cls):
+            object = getattr(cls, key)
+            if isinstance(getattr(cls, key), dataclasses.Field):
+                if object.default != dataclasses._MISSING_TYPE:
+                    defaults[key] = object.default
+                elif object.default_factory != dataclasses._MISSING_TYPE:
+                    defaults[key] = object.default_factory()
         args = ({**(defaults[0] if defaults else {}), **dict(*args, **kwargs)},)
 
         self = super().__new__(cls, *args)
