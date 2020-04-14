@@ -24,7 +24,6 @@ __version__ = "0.0.2"
 from .spec import *  # isort:skip
 from . import base
 from .base import *
-from .content_types import *
 from .dataclass import *
 from .python_types import *
 from .string_formats import *

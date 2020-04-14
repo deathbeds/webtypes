@@ -207,6 +207,9 @@ class Link:
         else:
             self._display_id = IPython.display.display(data, raw=True, display_id=True)
 
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        return {"text/plain": str(self)}, {}
+
 
 class _EventedObject(Link):
     ...
@@ -222,9 +225,6 @@ class _EventedDataclass(_EventedObject):
                 super().__setattr__(key, object)
                 if object is not prior:
                     self._propagate(key, **{key: prior})
-
-    def _repr_mimebundle_(self, include=None, exclude=None):
-        return {"text/plain": str(self)}, {}
 
 
 class DataClass(_EventedDataclass, wtypes.DataClass):
@@ -293,6 +293,11 @@ class _EventedList(Link):
     def append(self, object):
         with self:
             super().append(object)
+            self._link_parent([object])
+
+    def insert(self, index, object):
+        with self:
+            super().insert(index, object)
             self._link_parent([object])
 
     def extend(self, object):

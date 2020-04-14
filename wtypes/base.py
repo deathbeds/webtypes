@@ -289,10 +289,10 @@ class _ContainerType(_ConstType):
         if isinstance(object, dict):
             schema.update(_get_schema_from_typeish(object))
         else:
-            if not isinstance(object, tuple):
-                object = (object,)
             if isinstance(object, (list, tuple)):
                 schema = [_get_schema_from_typeish(value) for value in object]
+            else:
+                schema = _get_schema_from_typeish(object)
         return cls + Trait.create(schema_key, **{schema_key: schema})
 
 
@@ -417,9 +417,9 @@ object
         if dataclasses.is_dataclass(cls):
             self = super().__new__(cls, *args, **kwargs)
             cls.validate(vars(self))
-        elif isinstance(cls, _ConstType) or issubclass(cls, Tuple):
-            if args:
-                return _object_to_webtype(args[0])(args[0])
+        elif isinstance(cls, _ConstType) and args:
+            self = _object_to_webtype(args[0])(args[0])
+
         else:
             self = super().__new__(cls, *args, **kwargs)
             # self.__init__(*args, **kwargs)
@@ -668,7 +668,7 @@ class _ObjectSchema(_SchemaMeta):
             return cls + Properties[object]
         if not isinstance(object, tuple):
             object = (object,)
-        return cls + AdditionalProperties[AnyOf[object,]]
+        return cls + AdditionalProperties[AnyOf[object]]
 
 
 class _Object(metaclass=_ObjectSchema, type="object"):
@@ -734,9 +734,6 @@ Examples
         self = super().__new__(cls, *args)
         self.__init__(*args)
         return self
-
-    def _validate(self):
-        type(self).validate(self)
 
     def __setitem__(self, key, object):
         """Only test the key being set to avoid invalid state."""
@@ -939,29 +936,32 @@ Tuple
         if items:
             if isinstance(items, dict):
                 if isinstance(id, slice):
-                    List[items].validate(object)
+                    type(self).validate(object)
                 else:
-                    jsonschema.validate(
-                        object, items, format_checker=jsonschema.draft7_format_checker
-                    )
+                    wtypes.manager.hook.validate_object(object=object, schema=items)
             elif isinstance(items, list):
                 if isinstance(id, slice):
                     # condition for negative slices
                     Tuple[tuple(items[id])].validate(object)
                 elif isinstance(id, int):
                     # condition for negative integers
-                    jsonschema.validate(
-                        object,
-                        items[id],
-                        format_checker=jsonschema.draft7_format_checker,
-                    )
+                    if id < len(items):
+                        wtypes.manager.hook.validate_object(
+                            object=object, schema=items[id]
+                        )
 
     def __setitem__(self, id, object):
         self._verify_item(object, id)
+        prior = self[id]
         super().__setitem__(id, object)
+        try:
+            type(self).validate(self)
+        except jsonschema.ValidationError as e:
+            self[id] = prior
+            raise e
 
     def append(self, object):
-        self._verify_item(object, len(self) + 1)
+        self._verify_item(object, len(self))
         super().append(object)
         try:
             type(self).validate(self)
