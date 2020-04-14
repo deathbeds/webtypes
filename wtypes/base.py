@@ -1,20 +1,14 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-"""extended python types for the web and json
+"""An extended type and trait system for python.
 
 Notes
 -----
-Attributes
-----------
-simpleTypes : list
-    The limited set of base types provide by jsonschema.
 
 Todo
 ---
-* Configuration Files
-* Observable Pattern
-* You have to also use ``sphinx.ext.todo`` extension
+* Widgets
 
 .. ``jsonschema`` documentation:
    https://json-schema.org/
@@ -34,13 +28,17 @@ import munch
 
 import wtypes
 
-simpleTypes = jsonschema.Draft7Validator.META_SCHEMA["definitions"]["simpleTypes"][
-    "enum"
-]
 ValidationError = jsonschema.ValidationError
 
 
 class _Implementation:
+    """An implementation of the pluggy wtypes spec.
+    
+Notes
+-----
+The implementation needs to be registered with the plugin manager.    
+"""
+
     @wtypes.implementation
     def validate_type(type):
         jsonschema.validate(
@@ -52,8 +50,22 @@ class _Implementation:
 
     @wtypes.implementation
     def validate_object(object, schema):
+        validate = schema
+        if isinstance(schema, type):
+            if hasattr(schema, "_schema"):
+                if isinstance(schema._schema, dict):
+                    validate = schema._schema
+        if "properties" in validate and isinstance(schema, type):
+            for property in validate["properties"]:
+                if property in getattr(schema, "__annotations__", {}):
+                    target = schema.__annotations__[property]
+                    if hasattr(target, "_schema") and not isinstance(
+                        target._schema, dict
+                    ):
+                        target.validate(get_jawn(object, property, None))
+
         jsonschema.validate(
-            object, schema, format_checker=jsonschema.draft7_format_checker
+            object, validate, format_checker=jsonschema.draft7_format_checker
         )
         return True
 
@@ -98,6 +110,10 @@ Attributes
 _context : dict
     The schema the object validates against.
 
+Notes
+-----
+A context type cannot be verified as it only describes, althrough some descriptors like SHACL can validate
+
 """
 
     _context = None
@@ -105,7 +121,7 @@ _context : dict
     def __new__(cls, name, base, kwargs):
         kwargs.update(_context=(kwargs.get("_schema") or {}).pop("context", None))
         cls = super().__new__(cls, name, base, kwargs)
-        cls._merge_context()
+        cls._merge_context(), cls._merge_annotations()
         return cls
 
     def _merge_context(cls):
@@ -113,6 +129,12 @@ _context : dict
         for self in cls.__mro__:
             context.update(munch.Munch.fromDict(getattr(self, "_context", {}) or {}))
         cls._context = context or None
+
+    def _merge_annotations(cls):
+        """Merge annotations from the module resolution order."""
+        cls.__annotations__ = getattr(cls, "__annotations__", {})
+        for module in reversed(type(cls).__mro__):
+            cls.__annotations__.update(getattr(module, "__annotations__", {}))
 
     def __matmul__(cls, object):
         cls = cls.create(cls.__name__)
@@ -130,6 +152,7 @@ _context : dict
         return cls
 
     def validate(cls, object):
+        """A context type does not validate."""
         return True
 
     def __instancecheck__(cls, object):
@@ -178,20 +201,9 @@ Attributes
 _schema : dict
     The schema the object validates against.
 
-_type
-    The resource type.
-
 """
 
     _schema = None
-    _context = {}
-
-    def _merge_annotations(cls):
-        """Merge annotations from the module resolution order."""
-        if not hasattr(cls, "__annotations__"):
-            cls.__annotations__ = {}
-        for module in reversed(type(cls).__mro__):
-            cls.__annotations__.update(getattr(module, "__annotations__", {}))
 
     def _merge_schema(cls):
         """Merge schema from the module resolution order."""
@@ -211,6 +223,7 @@ _type
                     else:
                         schema[k] = v
         if "required" in schema:
+            # Make required a unique list.
             schema["required"] = list(set(schema["required"]))
         cls._schema = schema
 
@@ -263,7 +276,7 @@ jsonschema.ValidationError
     The ``jsonschema`` module validation throws an exception on failure,
     otherwise the returns a None type.
 """
-        wtypes.manager.hook.validate_object(object=object, schema=cls._schema)
+        wtypes.manager.hook.validate_object(object=object, schema=cls)
 
 
 class _ConstType(_SchemaMeta):
@@ -350,7 +363,7 @@ def _get_schema_from_typeish(object):
     if isinstance(object, (list, tuple)):
         return list(map(_get_schema_from_typeish, object))
     object = _python_to_wtype(object)
-    if hasattr(object, "_schema"):
+    if isinstance(getattr(object, "_schema", None), dict):
         return object._schema
     return {}
 
@@ -665,7 +678,7 @@ class _ObjectSchema(_SchemaMeta):
 
     def __getitem__(cls, object):
         if isinstance(object, dict):
-            return cls + Properties[object]
+            return type(cls.__name__, (cls,), {"__annotations__": object})
         if not isinstance(object, tuple):
             object = (object,)
         return cls + AdditionalProperties[AnyOf[object]]
@@ -733,26 +746,53 @@ Examples
 
         self = super().__new__(cls, *args)
         self.__init__(*args)
+        wtypes.manager.hook.validate_object(object=self, schema=self)
         return self
 
     def __setitem__(self, key, object):
         """Only test the key being set to avoid invalid state."""
         properties = self._schema.get("properties", {})
-        if key in properties:
-            wtypes.manager.hook.validate_object(
-                object=object, schema=self._schema.get("properties", {}).get(key, {})
-            )
-        else:
-            wtypes.manager.hook.validate_object(
-                object={key: object}, schema={**self._schema, "required": []}
-            )
+        tmp = type(
+            "tmp",
+            (Dict,),
+            {
+                "__annotations__": {
+                    key: self.__annotations__.get(
+                        key,
+                        type(
+                            "tmp",
+                            (Trait,),
+                            {},
+                            **self._schema.get("properties", {}).get(key, {}),
+                        ),
+                    )
+                }
+            },
+        )
+        wtypes.manager.hook.validate_object(object={key: object}, schema=tmp)
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
         args = (dict(*args, **kwargs),)
-        wtypes.manager.hook.validate_object(
-            object=args[0], schema={**self._schema, "required": []}
+        tmp = type(
+            "tmp",
+            (Dict,),
+            {
+                "__annotations__": {
+                    key: self.__annotations__.get(
+                        key,
+                        type(
+                            "tmp",
+                            (Trait,),
+                            {},
+                            **self._schema.get("properties", {}).get(key, {}),
+                        ),
+                    )
+                    for key in args[0]
+                }
+            },
         )
+        wtypes.manager.hook.validate_object(object=args[0], schema=tmp)
         super().update(*args, **kwargs)
 
 
