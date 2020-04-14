@@ -10,23 +10,19 @@ import wtypes
 class Setter:
     def __setattr__(self, key, object):
         """Only test the attribute being set to avoid invalid state."""
-        type(
-            "tmp",
-            (wtypes.Dict,),
-            {
-                "__annotations__": {
-                    key: self.__annotations__.get(
-                        key,
-                        type(
-                            "tmp",
-                            (wtypes.Trait,),
-                            {},
-                            **self._schema.get("properties", {}).get(key, {}),
-                        ),
-                    )
-                }
-            },
-        ).validate({key: object})
+        for k in (key, ""):
+            if key in self.__annotations__:
+                cls = self.__annotations__[key]
+                break
+
+        else:
+            return builtins.object.__setattr__(self, key, object)
+
+        if hasattr(cls, "validate"):
+            cls.validate(object)
+        else:
+            wtypes.python_types._validate_generic_alias(object, cls)
+
         builtins.object.__setattr__(self, key, object)
 
 

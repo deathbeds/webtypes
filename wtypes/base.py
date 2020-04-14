@@ -50,21 +50,30 @@ The implementation needs to be registered with the plugin manager.
 
     @wtypes.implementation
     def validate_object(object, schema):
-        validate = schema
+
+        validate = munch.Munch.fromDict(schema)
         if dataclasses.is_dataclass(object):
             object = vars(object)
         if isinstance(schema, type):
+
             if hasattr(schema, "_schema"):
                 if isinstance(schema._schema, dict):
                     validate = schema._schema
-        if "properties" in validate and isinstance(schema, type):
-            for property in validate["properties"]:
-                if property in getattr(schema, "__annotations__", {}):
-                    target = schema.__annotations__[property]
-                    if hasattr(target, "_schema") and not isinstance(
-                        target._schema, dict
-                    ):
-                        target.validate(get_jawn(object, property, None))
+        if "properties" in validate:
+            annotations = getattr(schema, "__annotations__", {})
+            for property in list(validate["properties"]):
+                if property in annotations or "" in annotations:
+                    target = schema.__annotations__.get(
+                        property, schema.__annotations__.get("")
+                    )
+                    thing = get_jawn(object, property, None)
+
+                    if hasattr(target, "validate"):
+                        target.validate(thing)
+                    else:
+                        wtypes.python_types._validate_generic_alias(thing, target)
+
+                    validate.properties.pop(property, None)
 
         jsonschema.validate(
             object, validate, format_checker=jsonschema.draft7_format_checker
@@ -227,6 +236,8 @@ _schema : dict
         if "required" in schema:
             # Make required a unique list.
             schema["required"] = list(set(schema["required"]))
+        if "properties" in schema:
+            schema.properties.pop("", None)
         cls._schema = schema
 
     def __new__(cls, name, base, kwargs, **schema):
@@ -305,7 +316,9 @@ class _ContainerType(_ConstType):
             schema.update(_get_schema_from_typeish(object))
         else:
             if isinstance(object, (list, tuple)):
-                schema = [_get_schema_from_typeish(value) for value in object]
+                schema = [
+                    value for value in map(_get_schema_from_typeish, object) if value
+                ]
             else:
                 schema = _get_schema_from_typeish(object)
         return cls + Trait.create(schema_key, **{schema_key: schema})
@@ -358,6 +371,27 @@ def _python_to_wtype(object):
 
 def _get_schema_from_typeish(object):
     """infer a schema from an object."""
+    if isinstance(object, typing._GenericAlias):
+        # This is a typing union.
+        if object.__origin__ is typing.Union:
+            return munch.Munch.fromDict(
+                dict(
+                    anyOf=list(
+                        filter(bool, map(_get_schema_from_typeish, object.__args__))
+                    )
+                )
+            )
+        if object.__origin__ is tuple:
+            return _get_schema_from_typeish(Tuple[object.__args__])
+
+        if object.__origin__ is list:
+            return _get_schema_from_typeish(List[object.__args__])
+
+        if object.__origin__ is dict:
+            return munch.Munch.fromDict(
+                dict(additionalProperties=_get_schema_from_typeish(object.__args__[1]))
+            )
+
     if isinstance(object, dict):
         return munch.Munch.fromDict(
             {k: _get_schema_from_typeish(v) for k, v in object.items()}
@@ -681,11 +715,24 @@ class _ObjectSchema(_SchemaMeta):
     """Meta operations for the object schema."""
 
     def __getitem__(cls, object):
+        """
+        
+Examples
+--------
+    >>> Dict[Forward[range], int].__annotations__
+    {'': typing.Union[abc.Forward, int]}
+    >>> Dict[Forward[range], int]._schema.toDict()
+    {'type': 'object', 'properties': {'': {}}, 'required': [''], 'additionalProperties': {'anyOf': [{}, {'type': 'integer', 'default': 1}]}}
+        
+        """
         if isinstance(object, dict):
             return type(cls.__name__, (cls,), {"__annotations__": object})
         if not isinstance(object, tuple):
             object = (object,)
-        return cls + AdditionalProperties[AnyOf[object]]
+        return (
+            type(cls.__name__, (cls,), {"__annotations__": {"": typing.Union[object]}})
+            + AdditionalProperties[AnyOf[object]]
+        )
 
 
 class _Object(metaclass=_ObjectSchema, type="object"):
@@ -703,9 +750,11 @@ class _Object(metaclass=_ObjectSchema, type="object"):
             ):
                 cls._schema.properties[key]["default"] = getattr(cls, key)
             else:
-                cls._schema["required"] = cls._schema.get("required", [])
-                if not hasattr(cls, key):
-                    cls._schema["required"].append(key)
+                if dataclasses.is_dataclass(cls):
+                    # Only required attrs for dataclass unless it was specified!
+                    cls._schema["required"] = cls._schema.get("required", [])
+                    if not hasattr(cls, key):
+                        cls._schema["required"].append(key)
 
     @classmethod
     def from_config_file(cls, *object):
@@ -750,7 +799,7 @@ Examples
 
         self = super().__new__(cls, *args)
         self.__init__(*args)
-        wtypes.manager.hook.validate_object(object=self, schema=self)
+        wtypes.manager.hook.validate_object(object=self, schema=type(self))
         return self
 
     def __setitem__(self, key, object):
@@ -919,13 +968,43 @@ class _ListSchema(_SchemaMeta):
     """Meta operations for list types."""
 
     def __getitem__(cls, object):
+        """List meta operations for bracketed type notation.
+
+
+Examples
+--------
+
+    >>> List[Forward[range], int].__annotations__
+    {'': typing.List[typing.Union[abc.Forward, int]]}
+
+    >>> Tuple[Forward[range], int].__annotations__
+    {'': typing.Tuple[abc.Forward, int]}
+
+        """
         if istype(cls, Tuple):
             if not isinstance(object, tuple):
                 object = (object,)
-            return cls + Items[list(object)]
+            return (
+                type(
+                    cls.__name__,
+                    (cls,),
+                    {"__annotations__": {"": typing.Tuple[object]}},
+                )
+                + Items[list(object)]
+            )
         elif isinstance(object, tuple):
-            return cls + Items[AnyOf[object,]]
-        return cls + Items[object]
+            return (
+                type(
+                    cls.__name__,
+                    (cls,),
+                    {"__annotations__": {"": typing.List[typing.Union[object]]}},
+                )
+                + Items[AnyOf[object]]
+            )
+        return (
+            type(cls.__name__, (cls,), {"__annotations__": {"": object}})
+            + Items[object]
+        )
 
     def __gt__(cls, object):
         """Minumum array length"""
@@ -1156,7 +1235,7 @@ Examples
 """
 
 
-class OneOf(Trait, _NoInit, metaclass=_ContainerType):
+class OneOf(Trait, metaclass=_ContainerType):
     """oneOf combined schema.
 
 Examples

@@ -62,7 +62,7 @@ Python types live on the __annotations__ attribute.
                 schema[-1].__forward_evaluated__ = True
                 schema[-1].__forward_value__ = object
         cls = cls.create(cls.__name__)
-        cls._schema = schema[0]
+        cls._schema = typing.Union[tuple(schema)]
         return cls
 
     def validate(cls, object):
@@ -156,9 +156,41 @@ Deffered references.
 
     @classmethod
     def validate(cls, object):
-        try:
-            if isinstance(object, cls.eval()):
-                return
-        except:
-            ...
+        _validate_generic_alias(object, cls.eval())
+
+
+def _validate_generic_alias(object, cls):
+    if isinstance(cls, typing._GenericAlias):
+        if cls.__origin__ is typing.Union:
+            for args in cls.__args__:
+                if isinstance(object, args):
+                    break
+            else:
+                raise wtypes.ValidationError(f"{object} is not an instance of {cls}")
+        else:
+            if not isinstance(object, cls.__origin__):
+                raise wtypes.ValidationError(f"{object} is not an instance of {cls}")
+
+            if cls.__origin__ is tuple:
+                for i, value in enumerate(object):
+                    if not _validate_generic_alias(value, cls.__args__[i]):
+                        raise wtypes.ValidationError(
+                            f"Element {i}: {object} is not an instance of {cls.__args__[i]}"
+                        )
+            elif cls.__origin__ is list:
+                for i, value in enumerate(object):
+                    if not _validate_generic_alias(value, cls.__args__[0]):
+                        raise wtypes.ValidationError(
+                            f"Element {i}: {object} is not an instance of {cls.__args__[0]}"
+                        )
+            elif object.__origin__ is dict:
+                for key, value in object.items():
+                    if not _validate_generic_alias(value, cls.__args__[1]):
+                        raise wtypes.ValidationError(
+                            f"Entry {key}: {object} is not an instance of {cls.__args__[0]}"
+                        )
+        return True
+
+    if not isinstance(object, cls):
         raise wtypes.ValidationError(f"{object} is not an instance of {cls._schema}.")
+    return True
