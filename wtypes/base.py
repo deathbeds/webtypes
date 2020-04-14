@@ -51,6 +51,8 @@ The implementation needs to be registered with the plugin manager.
     @wtypes.implementation
     def validate_object(object, schema):
         validate = schema
+        if dataclasses.is_dataclass(object):
+            object = vars(object)
         if isinstance(schema, type):
             if hasattr(schema, "_schema"):
                 if isinstance(schema._schema, dict):
@@ -425,15 +427,17 @@ Returns
 object
     Return an instance of the object and carry along the schema information.
 """
-        args = cls._resolve_defaults(*args, **kwargs)
-        args and cls.validate(args[0])
+
         if dataclasses.is_dataclass(cls):
-            self = super().__new__(cls, *args, **kwargs)
-            cls.validate(vars(self))
+            self = super().__new__(cls)
+            self.__init__(*args, **kwargs)
+            cls.validate(self)
         elif isinstance(cls, _ConstType) and args:
+            cls.validate(args[0])
             self = _object_to_webtype(args[0])(args[0])
 
         else:
+            args = cls._resolve_defaults(*args, **kwargs)
             self = super().__new__(cls, *args, **kwargs)
             # self.__init__(*args, **kwargs)
             args or cls.validate(self)
@@ -697,10 +701,10 @@ class _Object(metaclass=_ObjectSchema, type="object"):
             if hasattr(cls, key) and not isinstance(
                 getattr(cls, key), dataclasses.Field
             ):
-                cls._schema.properties[key].default = getattr(cls, key)
+                cls._schema.properties[key]["default"] = getattr(cls, key)
             else:
                 cls._schema["required"] = cls._schema.get("required", [])
-                if key not in cls._schema["required"]:
+                if not hasattr(cls, key):
                     cls._schema["required"].append(key)
 
     @classmethod

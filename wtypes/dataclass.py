@@ -1,4 +1,5 @@
 """Compatability for wtyped dataclasses."""
+import builtins
 import dataclasses
 
 import jsonschema
@@ -6,7 +7,30 @@ import jsonschema
 import wtypes
 
 
-class DataClass(wtypes.Trait, wtypes.base._Object):
+class Setter:
+    def __setattr__(self, key, object):
+        """Only test the attribute being set to avoid invalid state."""
+        type(
+            "tmp",
+            (wtypes.Dict,),
+            {
+                "__annotations__": {
+                    key: self.__annotations__.get(
+                        key,
+                        type(
+                            "tmp",
+                            (wtypes.Trait,),
+                            {},
+                            **self._schema.get("properties", {}).get(key, {}),
+                        ),
+                    )
+                }
+            },
+        ).validate({key: object})
+        builtins.object.__setattr__(self, key, object)
+
+
+class DataClass(Setter, wtypes.Trait, wtypes.base._Object):
     """Validating dataclass type
     
 Examples
@@ -23,31 +47,9 @@ Examples
     
     """
 
-    def __new__(cls, *args, **kwargs):
-        self = super(wtypes.Trait, cls).__new__(cls)
-        # dataclass instantiates the defaults for us.
-        self.__init__(*args, **kwargs)
-        return self
-
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__()
         dataclasses.dataclass(cls)
-
-    def __setattr__(self, key, object):
-        """Only test the attribute being set to avoid invalid state."""
-        if isinstance(object, dict):
-            object = object.get(key)
-        properties = self._schema.get("properties", {})
-        (
-            wtypes.manager.hook.validate_object(
-                object=object, schema=self._schema.get("properties", {}).get(key, {})
-            )
-            if key in properties
-            else wtypes.manager.hook.validate_object(
-                object={key: object}, schema={**self._schema, "required": []}
-            )
-        )
-        super().__setattr__(key, object)
 
 
 # ## Configuration classes

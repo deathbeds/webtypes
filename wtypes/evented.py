@@ -215,22 +215,6 @@ class _EventedObject(Link):
     ...
 
 
-class _EventedDataclass(_EventedObject):
-    def __setattr__(self, key, object):
-        if key in {"_depth", "_deferred_changed", "_deferred_prior"}:
-            return super().__setattr__(key, object)
-        else:
-            with self:
-                prior = getattr(self, key, None)
-                super().__setattr__(key, object)
-                if object is not prior:
-                    self._propagate(key, **{key: prior})
-
-
-class DataClass(_EventedDataclass, wtypes.DataClass):
-    ...
-
-
 class _EventedDict(_EventedObject):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -260,6 +244,37 @@ class _EventedDict(_EventedObject):
                 k: v for k, v in prior.items() if v is not self.get(k, inspect._empty)
             }
             self._propagate(*args, **prior)
+
+
+class _EventedDataClass(_EventedObject):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._link_parent(self)
+
+    def _link_parent(self, object):
+        for k, v in object.items():
+            if isinstance(v, Link):
+                v._registered_parents = v._registered_parents or []
+                self in v._registered_parents or v._registered_parents.append(self)
+
+    def __setattr__(self, key, object):
+        if key in {
+            "_depth",
+            "_deferred_changed",
+            "_deferred_prior",
+            "_registered_parents",
+            "_registered_links",
+            "_registered_id",
+            "_display_id",
+        }:
+            return super().__setattr__(key, object)
+
+        with self:
+            prior = getattr(self, key, None)
+            super().__setattr__(key, object)
+            self._link_parent({key: object})
+            if object is not prior:
+                self._propagate(key, **{key: prior})
 
 
 class _EventedList(Link):
@@ -365,6 +380,10 @@ Examples
     {'new': 2, 'old': None, 'object': {'a': 2}, 'name': 'a'}
     
     """
+
+
+class DataClass(_EventedDataClass, wtypes.DataClass):
+    ...
 
 
 class Namespace(Dict):
