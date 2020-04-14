@@ -5,6 +5,15 @@ import wtypes
 
 
 class _ForwardSchema(wtypes.base._ContextMeta):
+    """A forward reference to an object, the object must exist in sys.modules.
+    
+    
+Notes
+-----
+Python types live on the __annotations__ attribute.
+
+    """
+
     _schema = None
     _schema_args = None
     _schema_kwargs = None
@@ -114,8 +123,12 @@ Examples
 
     @classmethod
     def validate(cls, object):
-        if not issubclass(object, cls.eval()):
-            raise TypeError(f"{object} is not a type of {cls.eval()}.")
+        try:
+            if issubclass(object, cls.eval()):
+                return
+        except:
+            ...
+        raise wtypes.ValidationError(f"{object} is not a type of {cls._schema}.")
 
 
 class Instance(Forward):
@@ -127,6 +140,11 @@ Examples
     >>> assert (Instance[range] + Args[10, 20])() == range(10, 20)
     >>> assert (Instance['builtins.range'] + Args[10, 20])() == range(10, 20)
     >>> assert isinstance(range(10), Instance['builtins.range'])
+
+Deffered references.
+
+    >>> assert not isinstance(1, Instance['pandas.DataFrame'])
+    >>> assert 'pandas' not in __import__('sys').modules
     
     
     """
@@ -138,5 +156,9 @@ Examples
 
     @classmethod
     def validate(cls, object):
-        if not isinstance(object, cls.eval()):
-            raise ValueError(f"{object} is not an instance of {cls.eval()}.")
+        try:
+            if isinstance(object, cls.eval()):
+                return
+        except:
+            ...
+        raise wtypes.ValidationError(f"{object} is not an instance of {cls._schema}.")
