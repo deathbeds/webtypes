@@ -192,5 +192,7 @@ def _validate_generic_alias(object, cls):
         return True
 
     if not isinstance(object, cls):
-        raise wtypes.ValidationError(f"{object} is not an instance of {cls._schema}.")
+        raise wtypes.ValidationError(
+            f"{object} is not an instance of {getattr(cls, '_schema', cls)}."
+        )
     return True

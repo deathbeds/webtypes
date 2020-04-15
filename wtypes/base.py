@@ -73,7 +73,8 @@ The implementation needs to be registered with the plugin manager.
                     else:
                         wtypes.python_types._validate_generic_alias(thing, target)
 
-                    validate.properties.pop(property, None)
+                    if property in validate.properties:
+                        validate.properties = {}
 
         jsonschema.validate(
             object, validate, format_checker=jsonschema.draft7_format_checker
@@ -722,7 +723,8 @@ Examples
     >>> Dict[wtypes.Forward[range], int].__annotations__
     {'': typing.Union[abc.Forward, int]}
     >>> Dict[wtypes.Forward[range], int]._schema.toDict()
-    {'type': 'object', 'properties': {'': {}}, 'required': [''], 'additionalProperties': {'anyOf': [{}, {'type': 'integer', 'default': 1}]}}
+    {'type': 'object', 'properties': {}, 'additionalProperties': {'anyOf': [{'type': 'integer'}]}}
+
         
         """
         if isinstance(object, dict):
@@ -1046,7 +1048,9 @@ Tuple
         args = cls._resolve_defaults(*args)
         if args and isinstance(args[0], tuple):
             args = (list(args[0]) + list(args[1:]),)
-        return super().__new__(cls, *args, **kwargs)
+        self = super().__new__(cls, *args, **kwargs)
+        cls.validate(self)
+        return self
 
     def _verify_item(self, object, id=None):
         items = self._schema.get("items", None)
