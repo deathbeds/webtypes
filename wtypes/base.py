@@ -1048,8 +1048,8 @@ Tuple
         args = cls._resolve_defaults(*args)
         if args and isinstance(args[0], tuple):
             args = (list(args[0]) + list(args[1:]),)
+        args and cls.validate(args[0])
         self = super().__new__(cls, *args, **kwargs)
-        cls.validate(self)
         return self
 
     def _verify_item(self, object, id=None):
