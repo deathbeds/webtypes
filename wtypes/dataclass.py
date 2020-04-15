@@ -46,6 +46,14 @@ Examples
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__()
         dataclasses.dataclass(cls)
+        required = []
+        for key in cls.__annotations__:
+            if not hasattr(cls, key):
+                required.append(key)
+        if required:
+            cls._schema["required"] = list(
+                set(cls._schema.get("required", []) + required)
+            )
 
 
 # ## Configuration classes

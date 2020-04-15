@@ -719,9 +719,9 @@ class _ObjectSchema(_SchemaMeta):
         
 Examples
 --------
-    >>> Dict[Forward[range], int].__annotations__
+    >>> Dict[wtypes.Forward[range], int].__annotations__
     {'': typing.Union[abc.Forward, int]}
-    >>> Dict[Forward[range], int]._schema.toDict()
+    >>> Dict[wtypes.Forward[range], int]._schema.toDict()
     {'type': 'object', 'properties': {'': {}}, 'required': [''], 'additionalProperties': {'anyOf': [{}, {'type': 'integer', 'default': 1}]}}
         
         """
@@ -749,12 +749,6 @@ class _Object(metaclass=_ObjectSchema, type="object"):
                 getattr(cls, key), dataclasses.Field
             ):
                 cls._schema.properties[key]["default"] = getattr(cls, key)
-            else:
-                if dataclasses.is_dataclass(cls):
-                    # Only required attrs for dataclass unless it was specified!
-                    cls._schema["required"] = cls._schema.get("required", [])
-                    if not hasattr(cls, key):
-                        cls._schema["required"].append(key)
 
     @classmethod
     def from_config_file(cls, *object):
@@ -974,10 +968,10 @@ class _ListSchema(_SchemaMeta):
 Examples
 --------
 
-    >>> List[Forward[range], int].__annotations__
+    >>> List[wtypes.Forward[range], int].__annotations__
     {'': typing.List[typing.Union[abc.Forward, int]]}
 
-    >>> Tuple[Forward[range], int].__annotations__
+    >>> Tuple[wtypes.Forward[range], int].__annotations__
     {'': typing.Tuple[abc.Forward, int]}
 
         """
