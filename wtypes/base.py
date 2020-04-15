@@ -66,7 +66,13 @@ The implementation needs to be registered with the plugin manager.
                     target = schema.__annotations__.get(
                         property, schema.__annotations__.get("")
                     )
-                    thing = get_jawn(object, property, None)
+
+                    if isinstance(object, typing.Mapping) and property in object:
+                        thing = object[property]
+                    elif hasattr(object, property):
+                        thing = getattr(object, property)
+                    else:
+                        continue
 
                     if hasattr(target, "validate"):
                         target.validate(thing)
@@ -479,7 +485,7 @@ object
         return self
 
     @classmethod
-    def _resolve_defaults(cls, *args, **kwargs):
+    def _resolve_defaults(cls, *args, **kwargs) -> tuple:
         if not args and not kwargs:
             if "default" in cls._schema:
                 return (cls._schema.default,)
@@ -790,8 +796,8 @@ Examples
     """
 
     def __new__(cls, *args, **kwargs):
-        defaults = cls._resolve_defaults()
-        args = ({**(defaults[0] if defaults else {}), **dict(*args, **kwargs)},)
+
+        args = (dict(*args, **kwargs),) if args or kwargs else cls._resolve_defaults()
 
         self = super().__new__(cls, *args)
         self.__init__(*args)
