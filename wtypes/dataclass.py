@@ -54,10 +54,3 @@ Examples
             cls._schema["required"] = list(
                 set(cls._schema.get("required", []) + required)
             )
-
-
-# ## Configuration classes
-
-
-class Configurable(DataClass):
-    """A configurable classs that is create with dataclass syntax."""
