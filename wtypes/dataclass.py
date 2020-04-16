@@ -21,7 +21,7 @@ class Setter:
         if hasattr(cls, "validate"):
             cls.validate(object)
         else:
-            wtypes.python_types._validate_generic_alias(object, cls)
+            wtypes.validate_generic(object, cls)
 
         builtins.object.__setattr__(self, key, object)
 

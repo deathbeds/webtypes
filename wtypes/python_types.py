@@ -145,47 +145,4 @@ Deffered references.
 
     @classmethod
     def validate(cls, object):
-        _validate_generic_alias(object, cls.eval())
-
-
-def _validate_generic_alias(object, cls):
-    if cls is None:
-        return
-    if isinstance(cls, dict):
-        wtypes.manager.hook.validate_object(object=object, schema=cls)
-        return
-    if isinstance(cls, tuple):
-        cls = typing.Union[cls]
-    if isinstance(cls, typing._GenericAlias):
-        if cls.__origin__ is typing.Union:
-            for args in cls.__args__:
-                if isinstance(object, args):
-                    break
-            else:
-                raise wtypes.ValidationError(f"{object} is not an instance of {cls}")
-        else:
-            if cls.__origin__ is tuple:
-                for i, value in enumerate(object):
-                    if not _validate_generic_alias(value, cls.__args__[i]):
-                        raise wtypes.ValidationError(
-                            f"Element {i}: {object} is not an instance of {cls.__args__[i]}"
-                        )
-            elif cls.__origin__ is list:
-                for i, value in enumerate(object):
-                    if not _validate_generic_alias(value, cls.__args__[0]):
-                        raise wtypes.ValidationError(
-                            f"Element {i}: {object} is not an instance of {cls.__args__[0]}"
-                        )
-            elif object.__origin__ is dict:
-                for key, value in object.items():
-                    if not _validate_generic_alias(value, cls.__args__[1]):
-                        raise wtypes.ValidationError(
-                            f"Entry {key}: {object} is not an instance of {cls.__args__[0]}"
-                        )
-        return True
-
-    if not isinstance(object, cls):
-        raise wtypes.ValidationError(
-            f"{object} is not an instance of {getattr(cls, '_schema', cls)}."
-        )
-    return True
+        wtypes.validate_generic(object, cls.eval())

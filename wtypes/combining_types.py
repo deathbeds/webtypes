@@ -7,9 +7,7 @@ class _NotType(wtypes.base._ConstType):
     def validate(cls, object):
         super().validate(object)
         try:
-            cls._type and not wtypes.python_types._validate_generic_alias(
-                object, cls._type
-            )
+            cls._type and not wtypes.validate_generic(object, cls._type)
             raise wtypes.ValidationError(f"{object} is an instance of {cls._type}")
         except wtypes.ValidationError:
             ...
@@ -49,7 +47,7 @@ class _AnyOfType(wtypes.base._ConstType):
         try:
             super().validate(object)
         except ValidationError as error:
-            wtypes.python_types._validate_generic_alias(object, cls._type)
+            wtypes.validate_generic(object, cls._type)
 
     def __getitem__(cls, object):
         if isinstance(object, tuple):
@@ -82,7 +80,7 @@ class _AllOfType(wtypes.base._ConstType):
     def validate(cls, object):
         super().validate(object)
         [
-            wtypes.python_types._validate_generic_alias(object, t)
+            wtypes.validate_generic(object, t)
             for t in (
                 cls._type.__args__
                 if isinstance(cls._type, typing._GenericAlias)
@@ -126,7 +124,7 @@ class _OneOfType(wtypes.base._ConstType):
             else (cls._type,)
         ):
             try:
-                wtypes.python_types._validate_generic_alias(object, t)
+                wtypes.validate_generic(object, t)
                 success += 1
                 if success > 1:
                     break
@@ -134,7 +132,7 @@ class _OneOfType(wtypes.base._ConstType):
                 ...
         else:
             try:
-                wtypes.python_types._validate_generic_alias(object, cls._schema)
+                wtypes.validate_generic(object, cls._schema)
                 if success:
                     raise wtypes.ValidationError(
                         f"{object} matched too many types of {cls}"

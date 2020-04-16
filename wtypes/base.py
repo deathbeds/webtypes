@@ -824,7 +824,7 @@ Examples
             key,
             self.__annotations__.get("", self._schema.get("properties", {}).get(key)),
         )
-        wtypes.python_types._validate_generic_alias(object, cls)
+        wtypes.validate_generic(object, cls)
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
@@ -1066,27 +1066,23 @@ Tuple
         if items or "" in self.__annotations__:
             if isinstance(items, dict):
                 if isinstance(id, slice):
-                    wtypes.python_types._validate_generic_alias(object, self._type)
+                    wtypes.validate_generic(object, self._type)
                 else:
-                    wtypes.python_types._validate_generic_alias([object], self._type)
+                    wtypes.validate_generic([object], self._type)
             elif isinstance(items, list):
                 if isinstance(id, slice):
                     # condition for negative slices
                     if isinstance(self._type, typing.Generic):
-                        wtypes.python_types._validate_generic_alias(
+                        wtypes.validate_generic(
                             object, typing.Tuple[tuple(self._type.__args__[id])]
                         )
                 elif isinstance(id, int):
                     # condition for negative integers
                     if id < len(items):
                         if isinstance(self._type, typing.Generic):
-                            wtypes.python_types._validate_generic_alias(
-                                object, self._type.__args__[id]
-                            )
+                            wtypes.validate_generic(object, self._type.__args__[id])
                         else:
-                            wtypes.python_types._validate_generic_alias(
-                                object, items[id]
-                            )
+                            wtypes.validate_generic(object, items[id])
 
     def __setitem__(self, id, object):
         self._verify_item(object, id)

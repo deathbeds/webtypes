@@ -185,7 +185,9 @@ class Link:
                                         if get_jawn(thing, to, None) is not get_jawn(
                                             self, key, inspect._empty
                                         ):
-                                            set_jawn(thing, to, self[key])
+                                            set_jawn(
+                                                thing, to, get_jawn(self, key, None)
+                                            )
 
     def _update_display(self):
         if self._display_id:
