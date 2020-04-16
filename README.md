@@ -1,5 +1,12 @@
 A extended trait and type system for python using `jsonschema`. 
 
+`wtypes` is an extended type and trait system for python.
+
+* [Documentation](https://wtypes.readthedocs.io/)
+* [Pypi](https://pypi.org/project/wtypes/)
+* [Tests](https://github.com/deathbeds/wtypes/actions)
+
+
 ```bash
 pip install wtypes
 ```
@@ -11,12 +18,6 @@ pip install wtypes
         import pydantic, traitlets, IPython, jupyter, genson, hypothesis_jsonschema, hypothesis, dataclasses
 
 -->
-
-`wtypes` is an extended type and trait system for python.
-
-* [Documentation](https://wtypes.readthedocs.io/)
-* [Pypi](https://pypi.org/project/wtypes/)
-* [Tests](https://github.com/deathbeds/wtypes/actions)
 
 `wtypes` provide:
 * Extended type system python validation that feature a `jsonschema` and symbollic type composition.
