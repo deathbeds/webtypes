@@ -145,16 +145,32 @@ A context type cannot be verified as it only describes, althrough some descripto
     _type = None
 
     def __new__(cls, name, base, kwargs, **schema):
+
         kwargs.update(
             _schema=schema,
             _context=schema.pop("context", None),
             _type=schema.pop("py", None),
         )
+        if "args" in schema:
+            kwargs.update({"_type_args": schema.pop("args")})
+        if "keywords" in schema:
+            kwargs.update({"_type_kwargs": schema.pop("keywords")})
         cls = super().__new__(cls, name, base, kwargs)
-        cls._merge_context(), cls._merge_annotations(), cls._merge_types(), cls._merge_schema(),
+        cls._merge_context(), cls._merge_annotations(), cls._merge_types(), cls._merge_schema(), cls._merge_args()
         if isinstance(cls._schema, dict):
             wtypes.manager.hook.validate_type(type=cls)
         return cls
+
+    def _merge_args(cls):
+        args, kwargs = [], {}
+        for object in reversed(cls.__mro__):
+            if hasattr(object, "_type_args"):
+                if object._type_args is not None:
+                    args = object._type_args
+            if hasattr(object, "_type_kwargs"):
+                kwargs.update(object._type_kwargs or {})
+        cls._type_args = args or None
+        cls._type_kwargs = kwargs or None
 
     def _merge_context(cls):
         context = munch.Munch()
@@ -206,8 +222,11 @@ A context type cannot be verified as it only describes, althrough some descripto
             current = getattr(self, "_type", None)
             if current is not None:
                 types.append(current)
+
         if types:
-            cls._type = typing.Union[tuple(set(types))]
+            cls._type = typing.Union[tuple(types)]
+        if hasattr(self, "_type_args"):
+            cls._merge_args()
 
     def __matmul__(cls, object):
         cls = cls.create(cls.__name__)
@@ -261,9 +280,33 @@ type
             cls.__name__ + object.__name__,
             (cls,),
             dict(),
-            py=object,
-            **getattr(object, "_schema", {}),
+            py=None if isinstance(object, wtypes.python_types._NoType) else object,
+            **{
+                "args": getattr(object, "_type_args", None),
+                "keywords": getattr(object, "_type_kwargs", None),
+                **getattr(object, "_schema", {}),
+            },
         )
+
+    def __neg__(cls):
+        """The Not version of a type."""
+        return wtypes.combining_types.Not[cls]
+
+    def __pos__(cls):
+        """The type."""
+        return cls
+
+    def __and__(cls, object):
+        """AllOf the conditions"""
+        return wtypes.combining_types.AllOf[cls, object]
+
+    def __sub__(cls, object):
+        """AnyOf the conditions"""
+        return wtypes.combining_types.AnyOf[cls, object]
+
+    def __or__(cls, object):
+        """OneOf the conditions"""
+        return wtypes.combining_types.OneOf[cls, object]
 
 
 class _SchemaMeta(_ContextMeta):
@@ -293,11 +336,11 @@ _schema : dict
 
     def __sub__(cls, object):
         """AnyOf the conditions"""
-        return wtypes.combining_types.AnyOf[cls, object]
+        return wtypes.combining_types.OneOf[cls, object]
 
     def __or__(cls, object):
         """OneOf the conditions"""
-        return wtypes.combining_types.OneOf[cls, object]
+        return wtypes.combining_types.AnyOf[cls, object]
 
     def validate(cls, object):
         """Validate an object against type's schema.
@@ -479,7 +522,7 @@ object
             self.__init__(*args, **kwargs)
             cls.validate(self)
         elif isinstance(cls, _ConstType) and args:
-            cls.validate(args[0])
+            wtypes.validate_generic(args[0], getattr(cls, "_type", cls))
             current_type = type(args[0])
             candidate_type = _python_to_wtype(current_type)
             self = args[0]
@@ -824,7 +867,7 @@ Examples
             key,
             self.__annotations__.get("", self._schema.get("properties", {}).get(key)),
         )
-        wtypes.python_types._validate_generic_alias(object, cls)
+        wtypes.validate_generic(object, cls)
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
@@ -1066,27 +1109,23 @@ Tuple
         if items or "" in self.__annotations__:
             if isinstance(items, dict):
                 if isinstance(id, slice):
-                    wtypes.python_types._validate_generic_alias(object, self._type)
+                    wtypes.validate_generic(object, self._type)
                 else:
-                    wtypes.python_types._validate_generic_alias([object], self._type)
+                    wtypes.validate_generic([object], self._type)
             elif isinstance(items, list):
                 if isinstance(id, slice):
                     # condition for negative slices
                     if isinstance(self._type, typing.Generic):
-                        wtypes.python_types._validate_generic_alias(
+                        wtypes.validate_generic(
                             object, typing.Tuple[tuple(self._type.__args__[id])]
                         )
                 elif isinstance(id, int):
                     # condition for negative integers
                     if id < len(items):
                         if isinstance(self._type, typing.Generic):
-                            wtypes.python_types._validate_generic_alias(
-                                object, self._type.__args__[id]
-                            )
+                            wtypes.validate_generic(object, self._type.__args__[id])
                         else:
-                            wtypes.python_types._validate_generic_alias(
-                                object, items[id]
-                            )
+                            wtypes.validate_generic(object, items[id])
 
     def __setitem__(self, id, object):
         self._verify_item(object, id)

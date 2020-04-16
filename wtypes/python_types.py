@@ -4,6 +4,10 @@ import typing
 import wtypes
 
 
+class _NoType:
+    ...
+
+
 class _ForwardSchema(wtypes.base._ContextMeta):
     """A forward reference to an object, the object must exist in sys.modules.
     
@@ -26,20 +30,6 @@ Python types live on the __annotations__ attribute.
         cls._merge_args()
         return cls
 
-    def __add__(cls, object):
-        """Add types together"""
-        return type(cls.__name__, (cls, object), {})
-
-    def _merge_args(cls):
-        args, kwargs = [], {}
-        for object in reversed(cls.__mro__):
-            if hasattr(object, "_type_args"):
-                args.extend(list(object._type_args or []))
-            if hasattr(object, "_type_kwargs"):
-                kwargs.update(object._type_kwargs or {})
-        cls._type_args = args or None
-        cls._type_kwargs = kwargs or None
-
     def __getitem__(cls, object):
         if not isinstance(object, tuple):
             object = (object,)
@@ -57,24 +47,39 @@ Python types live on the __annotations__ attribute.
 
     def eval(cls):
         t = typing.Union[cls._type]
-        t = t.__args__[-1] if isinstance(t, typing._GenericAlias) else t
+        t = t.__args__[0] if isinstance(t, typing._GenericAlias) else t
         if isinstance(t, typing.ForwardRef):
             return t._evaluate(sys.modules, sys.modules)
         return t
 
+    def __add__(cls, object):
+        # Cycle through dicts and lists
+        if isinstance(object, dict):
+            return type(cls.__name__ + object.__name__, (cls,), dict(), **object)
+        if isinstance(object, Forward):
+            return type(cls.__name__ + object.__name__, (cls, object), dict(),)
+        return super().__add__(object)
+
 
 class _ArgumentSchema(_ForwardSchema):
     def __getitem__(cls, object):
-        if not isinstance(object, tuple):
+        if not isinstance(object, dict) and not isinstance(object, tuple):
             object = (object,)
-        return cls.create(cls.__name__, **{cls.__name__.lower(): object})
+
+        return type(
+            cls.__name__, (cls,), {}, **{wtypes.base._lower_key(cls.__name__): object}
+        )
 
 
-class Args(wtypes.base._NoInit, wtypes.base._NoTitle, metaclass=_ArgumentSchema):
+class Args(
+    _NoType, wtypes.base._NoInit, wtypes.base._NoTitle, metaclass=_ArgumentSchema
+):
     ...
 
 
-class Keywords(wtypes.base._NoInit, wtypes.base._NoTitle, metaclass=_ArgumentSchema):
+class Kwargs(
+    _NoType, wtypes.base._NoInit, wtypes.base._NoTitle, metaclass=_ArgumentSchema
+):
     ...
 
 
@@ -141,51 +146,8 @@ Deffered references.
     def __new__(cls, *args, **kwargs):
         args = tuple(cls._type_args or tuple()) + args
         kwargs = {**(cls._type_kwargs or dict()), **kwargs}
-        return super().__new__(cls)(*args, **kwargs)
+        return cls.eval()(*args, **kwargs)
 
     @classmethod
     def validate(cls, object):
-        _validate_generic_alias(object, cls.eval())
-
-
-def _validate_generic_alias(object, cls):
-    if cls is None:
-        return
-    if isinstance(cls, dict):
-        wtypes.manager.hook.validate_object(object=object, schema=cls)
-        return
-    if isinstance(cls, tuple):
-        cls = typing.Union[cls]
-    if isinstance(cls, typing._GenericAlias):
-        if cls.__origin__ is typing.Union:
-            for args in cls.__args__:
-                if isinstance(object, args):
-                    break
-            else:
-                raise wtypes.ValidationError(f"{object} is not an instance of {cls}")
-        else:
-            if cls.__origin__ is tuple:
-                for i, value in enumerate(object):
-                    if not _validate_generic_alias(value, cls.__args__[i]):
-                        raise wtypes.ValidationError(
-                            f"Element {i}: {object} is not an instance of {cls.__args__[i]}"
-                        )
-            elif cls.__origin__ is list:
-                for i, value in enumerate(object):
-                    if not _validate_generic_alias(value, cls.__args__[0]):
-                        raise wtypes.ValidationError(
-                            f"Element {i}: {object} is not an instance of {cls.__args__[0]}"
-                        )
-            elif object.__origin__ is dict:
-                for key, value in object.items():
-                    if not _validate_generic_alias(value, cls.__args__[1]):
-                        raise wtypes.ValidationError(
-                            f"Entry {key}: {object} is not an instance of {cls.__args__[0]}"
-                        )
-        return True
-
-    if not isinstance(object, cls):
-        raise wtypes.ValidationError(
-            f"{object} is not an instance of {getattr(cls, '_schema', cls)}."
-        )
-    return True
+        wtypes.validate_generic(object, cls.eval())

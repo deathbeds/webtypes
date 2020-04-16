@@ -21,7 +21,7 @@ class Setter:
         if hasattr(cls, "validate"):
             cls.validate(object)
         else:
-            wtypes.python_types._validate_generic_alias(object, cls)
+            wtypes.validate_generic(object, cls)
 
         builtins.object.__setattr__(self, key, object)
 
@@ -54,10 +54,3 @@ Examples
             cls._schema["required"] = list(
                 set(cls._schema.get("required", []) + required)
             )
-
-
-# ## Configuration classes
-
-
-class Configurable(DataClass):
-    """A configurable classs that is create with dataclass syntax."""
