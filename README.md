@@ -47,6 +47,11 @@ pip install wtypes
 * Generate examples of types with [`hypothesis_jsonschema`][hyposchema] and [`genson`][genson]
 
         Uri.example(), Datetime.example(), Dict[{'a': Email}].example()
+
+* Mixed python and `jsonschema` types
+
+        t = Instance[range] | Integer
+        t(10), t(range(10))
         
 * _future work_ will expand on semantic RDF type information.
 
