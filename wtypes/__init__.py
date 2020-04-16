@@ -23,9 +23,9 @@ __version__ = "0.0.2"
 
 from .spec import *  # isort:skip
 from .utils import *  # isort:skip
+from .base import *  # isort:skip
 from . import evented  # isort:skip
 from . import base, combining_types, dataclass, examples, python_types, utils
-from .base import *
 from .combining_types import *
 from .dataclass import *
 from .python_types import *
