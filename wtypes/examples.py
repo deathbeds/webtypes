@@ -29,7 +29,7 @@ def generate_strategy_from_type(type):
 
 
 def generate_example(type):
-    return generate_strategy_from_type(type).example()
+    return type(generate_strategy_from_type(type).example())
 
 
 wtypes.base._SchemaMeta.example = generate_example

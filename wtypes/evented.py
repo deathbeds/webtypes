@@ -48,22 +48,47 @@ class spec_impl:
 class wtypes_impl(spec_impl):
     @wtypes.implementation
     def dlink(this, source, that, target, callable):
-        if hasattr(that, target) or isinstance(that, typing.Mapping) and target in that:
+        if (
+            isinstance(target, str)
+            and hasattr(that, target)
+            or isinstance(that, typing.Mapping)
+            and target in that
+        ):
             set_jawn(that, target, get_jawn(this, source, None))
         if issubclass(type(this), wtypes.Trait):
-            if this is that and source == target:
-                raise TypeError("""Linking types to themselves causes recursion.""")
-            this._registered_links = this._registered_links or {}
-            this._registered_id = this._registered_id or {}
-            this._registered_links[source] = this._registered_links.get(source, {})
-            if id(that) not in this._registered_links[source]:
-                this._registered_links[source][id(that)] = {}
-            if target not in this._registered_links[source][id(that)]:
-                this._registered_links[source][id(that)][target] = None
-            if id(that) not in this._registered_id:
-                this._registered_id[id(that)] = that
-            this._registered_links[source][id(that)][target] = callable
-            return this
+            if issubclass(type(that), wtypes.Trait):
+                this._registered_links = this._registered_links or {}
+                this._registered_id = this._registered_id or {}
+                this._registered_links[source] = this._registered_links.get(source, {})
+                if id(that) not in this._registered_links[source]:
+                    this._registered_links[source][id(that)] = {}
+                if target not in this._registered_links[source][id(that)]:
+                    this._registered_links[source][id(that)][target] = []
+                if id(that) not in this._registered_id:
+                    this._registered_id[id(that)] = that
+                if callable not in this._registered_links[source][id(that)][target]:
+                    this._registered_links[source][id(that)][target].append(callable)
+                return this
+
+            elif isinstance(that, wtypes.python_types.Forward["ipywidgets.Widget"]):
+                this.observe(source, lambda x: setattr(that, target, x["new"]))
+            elif isinstance(
+                that, wtypes.python_types.Forward["param.parameterized.Parameterized"]
+            ):
+                this.observe(source, lambda x: setattr(that, target, x["new"]))
+
+        elif isinstance(this, wtypes.python_types.Forward["ipywidgets.Widget"]):
+            this.observe(lambda x: that.__setitem__(target, x["new"]), source)
+        elif isinstance(
+            this, wtypes.python_types.Forward["param.parameterized.Parameterized"]
+        ):
+
+            def param_wrap(param, that, target):
+                def callback(*events):
+                    for event in events:
+                        set_jawn(that, target, event.new)
+
+            this.param.watch(param_wrap(this, that, target), source)
 
 
 wtypes.manager.add_hookspecs(spec)
@@ -71,6 +96,7 @@ wtypes.manager.register(wtypes_impl)
 
 
 class Link:
+    _registered_parents = None
     _registered_links = None
     _registered_id = None
     _deferred_changed = None
@@ -83,7 +109,9 @@ class Link:
 
     def __exit__(self, *e):
         self._depth -= 1
-        self._deferred_changed and e == (None, None, None) and self._propagate()
+        if not self._depth:
+            self._propagate()
+            self._update_display()
 
     def link(this, source, that, target):
         wtypes.manager.hook.dlink(
@@ -114,30 +142,18 @@ class Link:
         )
         return self
 
-    def observe(self, source, callable=None):
+    def observe(self, source="", callable=None):
         """The callable has to define a signature."""
-        self._registered_links = self._registered_links or {}
-        self._registered_id = self._registered_id or {}
-        self._registered_links[source] = self._registered_links.get(source, {})
-        if id(self) not in self._registered_links[source]:
-            self._registered_links[source][id(self)] = {}
-        if id(self) not in self._registered_id:
-            self._registered_id[id(self)] = self
-        if source not in self._registered_links[source][id(self)]:
-            self._registered_links[source][id(self)][source] = []
-        self._registered_links[source][id(self)][source].append(callable)
-        return self
+        return self.dlink(source, self, source, callable=callable)
 
     def _propagate(self, *changed, **prior):
         self._deferred_changed = list(self._deferred_changed or changed)
         self._deferred_prior = {**prior, **(self._deferred_prior or {})}
 
-        if self._depth > 0:
-            return
-        with self:
+        if self._depth == 0:
             while self._deferred_changed:
                 key = self._deferred_changed.pop(-1)
-                old = self._deferred_prior.pop(key, None)
+                old = (self._deferred_prior or {}).pop(key, None)
                 for hash in (
                     self._registered_links[key]
                     if self._registered_links and key in self._registered_links
@@ -149,33 +165,37 @@ class Link:
                             for func in v:
                                 func(
                                     dict(
-                                        new=self.get(key, None),
+                                        new=self.get(key, None)
+                                        if hasattr(self, "get")
+                                        else None,
                                         old=old,
                                         object=self,
                                         name=key,
                                     )
                                 )
                         else:
-                            for to, function in self._registered_links[key][
+                            for to, functions in self._registered_links[key][
                                 hash
                             ].items():
-                                if callable(function):
-                                    thing.update({to: function(self[key])})
-                                else:
-                                    if get_jawn(thing, to, None) is not get_jawn(
-                                        self, key, inspect._empty
-                                    ):
-                                        set_jawn(thing, to, self[key])
+                                if functions:
+                                    function = functions[-1]
+                                    if callable(function):
+                                        thing.update({to: function(self[key])})
+                                    else:
+                                        if get_jawn(thing, to, None) is not get_jawn(
+                                            self, key, inspect._empty
+                                        ):
+                                            set_jawn(thing, to, self[key])
+
+    def _update_display(self):
         if self._display_id:
             import IPython, json
 
             data, metadata = self._repr_mimebundle_(None, None)
             self._display_id.update(data, metadata=metadata, raw=True)
 
-    def _repr_mimebundle_(self, include=None, exclude=None):
-        import json
-
-        return {"text/plain": repr(self)}, {}
+        for parent in self._registered_parents or []:
+            parent._update_display()
 
     def _ipython_display_(self):
         import IPython, json
@@ -187,12 +207,30 @@ class Link:
         else:
             self._display_id = IPython.display.display(data, raw=True, display_id=True)
 
+    def _repr_mimebundle_(self, include=None, exclude=None):
+        return {"text/plain": str(self)}, {}
 
-class _EventedDict(Link):
+
+class _EventedObject(Link):
+    ...
+
+
+class _EventedDict(_EventedObject):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._link_parent(self)
+
+    def _link_parent(self, object):
+        for k, v in object.items():
+            if isinstance(v, Link):
+                v._registered_parents = v._registered_parents or []
+                self in v._registered_parents or v._registered_parents.append(self)
+
     def __setitem__(self, key, object):
         with self:
             prior = self.get(key, None)
             super().__setitem__(key, object)
+            self._link_parent({key: object})
             if object is not prior:
                 self._propagate(key, **{key: prior})
 
@@ -201,11 +239,98 @@ class _EventedDict(Link):
             args = dict(*args, **kwargs)
             prior = {x: self[x] for x in args if x in self}
             super().update(args)
+            self._link_parent(args)
             prior = {
                 k: v for k, v in prior.items() if v is not self.get(k, inspect._empty)
             }
-            for k in args:
-                self._propagate(k, **prior)
+            self._propagate(*args, **prior)
+
+
+class _EventedDataClass(_EventedObject):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._link_parent(self)
+
+    def _link_parent(self, object):
+        for k, v in object.items():
+            if isinstance(v, Link):
+                v._registered_parents = v._registered_parents or []
+                self in v._registered_parents or v._registered_parents.append(self)
+
+    def __setattr__(self, key, object):
+        if key in {
+            "_depth",
+            "_deferred_changed",
+            "_deferred_prior",
+            "_registered_parents",
+            "_registered_links",
+            "_registered_id",
+            "_display_id",
+        }:
+            return super().__setattr__(key, object)
+
+        with self:
+            prior = getattr(self, key, None)
+            super().__setattr__(key, object)
+            self._link_parent({key: object})
+            if object is not prior:
+                self._propagate(key, **{key: prior})
+
+
+class _EventedList(Link):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._link_parent(self)
+
+    def _link_parent(self, object):
+        for v in object:
+            if isinstance(v, Link):
+                v._registered_parents = v._registered_parents or []
+                for p in v._registered_parents:
+                    if p is self:
+                        continue
+                else:
+                    v._registered_parents.append(self)
+
+    def __exit__(self, *e):
+        self._depth -= 1
+        if not self._depth:
+            self._update_display()
+        e != (None, None, None) and self._update_display()
+
+    def __setitem__(self, key, object):
+        if isinstance(key, str):
+            return
+        with self:
+            super().__setitem__(key, object)
+            self._link_parent([object])
+
+    def append(self, object):
+        with self:
+            super().append(object)
+            self._link_parent([object])
+
+    def insert(self, index, object):
+        with self:
+            super().insert(index, object)
+            self._link_parent([object])
+
+    def extend(self, object):
+        with self:
+            super().extend(object)
+            self._link_parent(object)
+
+    def pop(self, index=-1):
+        with self:
+            return super().pop(index)
+
+    def observe(self, callable=None):
+        """The callable has to define a signature."""
+        return self.dlink("", self, "", callable=callable)
+
+
+class List(_EventedList, wtypes.wtypes.List):
+    ...
 
 
 class Bunch(_EventedDict, wtypes.wtypes.Bunch):
@@ -257,39 +382,8 @@ Examples
     """
 
 
-class ipywidgets(spec_impl):
-    @wtypes.implementation
-    def dlink(this, source, that, target, callable):
-        import ipywidgets
-
-        if isinstance(that, ipywidgets.Widget):
-            this.observe(source, lambda x: setattr(that, target, x["new"]))
-            that.observe(lambda x: this.__setitem__(source, x["new"]), target)
-
-        if isinstance(this, ipywidgets.Widget):
-            this.observe(lambda x: that.__setitem__(target, x["new"]), source)
-            that.observe(target, lambda x: setattr(this, source, x["new"]))
-
-
-class panel(spec_impl):
-    """Not working yet."""
-
-    @wtypes.implementation
-    def dlink(this, source, that, target, callable):
-        def param_wrap(param, that, target):
-            def callback(*events):
-                for event in events:
-                    set_jawn(that, target, event.new)
-
-        import param
-
-        if isinstance(that, param.parameterized.Parameterized):
-            this.observe(source, lambda x: setattr(that, target, x["new"]))
-            that.param.watch(param_wrap(that, this, source), target)
-
-        if isinstance(this, param.parameterized.Parameterized):
-            this.param.watch(param_wrap(this, that, target), source)
-            that.observe(target, lambda x: setattr(this, source, x["new"]))
+class DataClass(_EventedDataClass, wtypes.DataClass):
+    ...
 
 
 class Namespace(Dict):
