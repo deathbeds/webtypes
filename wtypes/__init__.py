@@ -22,10 +22,11 @@ Todo
 __version__ = "0.0.2"
 
 from .spec import *  # isort:skip
-from . import base
+from .utils import *  # isort:skip
+from . import evented  # isort:skip
+from . import base, combining_types, dataclass, examples, python_types, utils
 from .base import *
+from .combining_types import *
 from .dataclass import *
 from .python_types import *
 from .string_formats import *
-
-from . import dataclass, evented, examples, python_types  # isort:skip

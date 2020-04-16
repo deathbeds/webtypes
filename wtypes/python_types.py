@@ -14,41 +14,31 @@ Python types live on the __annotations__ attribute.
 
     """
 
-    _schema = None
-    _schema_args = None
-    _schema_kwargs = None
+    _type_args = None
+    _type_kwargs = None
 
     def __new__(cls, name, base, kwargs, **schema):
         if "args" in schema:
-            kwargs.update({"_schema_args": schema.pop("args")})
+            kwargs.update({"_type_args": schema.pop("args")})
         if "keywords" in schema:
-            kwargs.update({"_schema_kwargs": schema.pop("keywords")})
-        kwargs["_schema"] = schema
-        cls = super().__new__(cls, name, base, kwargs)
-        cls._merge_schema()
+            kwargs.update({"_type_kwargs": schema.pop("keywords")})
+        cls = super().__new__(cls, name, base, kwargs, **schema)
+        cls._merge_args()
         return cls
 
     def __add__(cls, object):
         """Add types together"""
         return type(cls.__name__, (cls, object), {})
 
-    def _merge_schema(cls):
-        types, args, kwargs = [], [], {}
+    def _merge_args(cls):
+        args, kwargs = [], {}
         for object in reversed(cls.__mro__):
-            if hasattr(object, "_schema_args"):
-                args.extend(list(object._schema_args or []))
-            if hasattr(object, "_schema_kwargs"):
-                kwargs.update(object._schema_kwargs or {})
-            if hasattr(object, "_schema"):
-                if not object._schema:
-                    continue
-                if isinstance(object._schema, dict):
-                    continue
-                types.append(object._schema)
-
-        cls._schema = types and types[0] or None
-        cls._schema_args = args or None
-        cls._schema_kwargs = kwargs or None
+            if hasattr(object, "_type_args"):
+                args.extend(list(object._type_args or []))
+            if hasattr(object, "_type_kwargs"):
+                kwargs.update(object._type_kwargs or {})
+        cls._type_args = args or None
+        cls._type_kwargs = kwargs or None
 
     def __getitem__(cls, object):
         if not isinstance(object, tuple):
@@ -58,20 +48,19 @@ Python types live on the __annotations__ attribute.
             if isinstance(object, str):
                 schema.append(typing.ForwardRef(object))
             else:
-                schema.append(typing.ForwardRef(cls.__name__))
-                schema[-1].__forward_evaluated__ = True
-                schema[-1].__forward_value__ = object
-        cls = cls.create(cls.__name__)
-        cls._schema = typing.Union[tuple(schema)]
+                schema.append(object)
+        cls = cls.create(cls.__name__, py=typing.Union[tuple(schema)])
         return cls
 
     def validate(cls, object):
         cls.eval()
 
     def eval(cls):
-        if hasattr(cls._schema, "__args__"):
-            return tuple(x for x in cls._schema.__args__)
-        return cls._schema._evaluate(sys.modules, sys.modules)
+        t = typing.Union[cls._type]
+        t = t.__args__[-1] if isinstance(t, typing._GenericAlias) else t
+        if isinstance(t, typing.ForwardRef):
+            return t._evaluate(sys.modules, sys.modules)
+        return t
 
 
 class _ArgumentSchema(_ForwardSchema):
@@ -150,8 +139,8 @@ Deffered references.
     """
 
     def __new__(cls, *args, **kwargs):
-        args = tuple(cls._schema_args or tuple()) + args
-        kwargs = {**(cls._schema_kwargs or dict()), **kwargs}
+        args = tuple(cls._type_args or tuple()) + args
+        kwargs = {**(cls._type_kwargs or dict()), **kwargs}
         return super().__new__(cls)(*args, **kwargs)
 
     @classmethod
@@ -160,6 +149,13 @@ Deffered references.
 
 
 def _validate_generic_alias(object, cls):
+    if cls is None:
+        return
+    if isinstance(cls, dict):
+        wtypes.manager.hook.validate_object(object=object, schema=cls)
+        return
+    if isinstance(cls, tuple):
+        cls = typing.Union[cls]
     if isinstance(cls, typing._GenericAlias):
         if cls.__origin__ is typing.Union:
             for args in cls.__args__:
@@ -168,9 +164,6 @@ def _validate_generic_alias(object, cls):
             else:
                 raise wtypes.ValidationError(f"{object} is not an instance of {cls}")
         else:
-            if not isinstance(object, cls.__origin__):
-                raise wtypes.ValidationError(f"{object} is not an instance of {cls}")
-
             if cls.__origin__ is tuple:
                 for i, value in enumerate(object):
                     if not _validate_generic_alias(value, cls.__args__[i]):

@@ -50,12 +50,10 @@ The implementation needs to be registered with the plugin manager.
 
     @wtypes.implementation
     def validate_object(object, schema):
-
         validate = munch.Munch.fromDict(schema)
         if dataclasses.is_dataclass(object):
             object = vars(object)
         if isinstance(schema, type):
-
             if hasattr(schema, "_schema"):
                 if isinstance(schema._schema, dict):
                     validate = schema._schema
@@ -66,7 +64,6 @@ The implementation needs to be registered with the plugin manager.
                     target = schema.__annotations__.get(
                         property, schema.__annotations__.get("")
                     )
-
                     if isinstance(object, typing.Mapping) and property in object:
                         thing = object[property]
                     elif hasattr(object, property):
@@ -77,11 +74,15 @@ The implementation needs to be registered with the plugin manager.
                     if hasattr(target, "validate"):
                         target.validate(thing)
                     else:
-                        wtypes.python_types._validate_generic_alias(thing, target)
+                        wtypes.validate_generic(thing, target)
 
-                    if property in validate.properties:
-                        validate.properties = {}
-
+            validate = {
+                **validate,
+                "properties": {
+                    **validate["properties"],
+                    **{x: {} for x in validate["properties"]},
+                },
+            }
         jsonschema.validate(
             object, validate, format_checker=jsonschema.draft7_format_checker
         )
@@ -128,18 +129,31 @@ Attributes
 _context : dict
     The schema the object validates against.
 
+_type : type
+    The schema the object validates against.
+
+_schema: dict
+
 Notes
 -----
 A context type cannot be verified as it only describes, althrough some descriptors like SHACL can validate
 
 """
 
+    _schema = None
     _context = None
+    _type = None
 
-    def __new__(cls, name, base, kwargs):
-        kwargs.update(_context=(kwargs.get("_schema") or {}).pop("context", None))
+    def __new__(cls, name, base, kwargs, **schema):
+        kwargs.update(
+            _schema=schema,
+            _context=schema.pop("context", None),
+            _type=schema.pop("py", None),
+        )
         cls = super().__new__(cls, name, base, kwargs)
-        cls._merge_context(), cls._merge_annotations()
+        cls._merge_context(), cls._merge_annotations(), cls._merge_types(), cls._merge_schema(),
+        if isinstance(cls._schema, dict):
+            wtypes.manager.hook.validate_type(type=cls)
         return cls
 
     def _merge_context(cls):
@@ -153,6 +167,47 @@ A context type cannot be verified as it only describes, althrough some descripto
         cls.__annotations__ = getattr(cls, "__annotations__", {})
         for module in reversed(type(cls).__mro__):
             cls.__annotations__.update(getattr(module, "__annotations__", {}))
+
+    def _merge_schema(cls):
+        """Merge schema from the module resolution order."""
+        schema = munch.Munch()
+        types = list()
+        for self in reversed(cls.__mro__):
+            py_types = getattr(self, "_type", None)
+            for self in (py_types and (py_types,) or tuple()) + (self,):
+                current = getattr(self, "_schema", {})
+                if isinstance(current, dict):
+                    for k, v in current.items():
+                        if k in {"type", "not", "oneOf", "anyOf", "allOf", "enum"}:
+                            if not (dict({k: v}) in types):
+                                types.append(dict({k: v}))
+                        if isinstance(v, list):
+                            if k not in schema:
+                                schema[k] = list()
+                            schema[k] += v
+                        elif isinstance(v, dict):
+                            if k not in schema:
+                                schema[k] = dict()
+                            schema[k].update(v)
+                        else:
+                            schema[k] = v
+
+        if "required" in schema:
+            # Make required a unique list.
+            schema["required"] = list(set(schema["required"]))
+        if "properties" in schema:
+            schema.properties.pop("", None)
+        cls._schema = schema
+
+    def _merge_types(cls):
+        """Merge schema from the module resolution order."""
+        types = []
+        for self in reversed(cls.__mro__):
+            current = getattr(self, "_type", None)
+            if current is not None:
+                types.append(current)
+        if types:
+            cls._type = typing.Union[tuple(set(types))]
 
     def __matmul__(cls, object):
         cls = cls.create(cls.__name__)
@@ -171,7 +226,7 @@ A context type cannot be verified as it only describes, althrough some descripto
 
     def validate(cls, object):
         """A context type does not validate."""
-        return True
+        wtypes.manager.hook.validate_object(object=object, schema=cls)
 
     def __instancecheck__(cls, object):
         try:
@@ -182,8 +237,6 @@ A context type cannot be verified as it only describes, althrough some descripto
 
     def create(cls, name: str, **schema):
         """Create a new schema type.
-
-
         
 
 Parameters
@@ -201,10 +254,15 @@ type
         return type(name, (cls,), {}, **schema)
 
     def __add__(cls, object):
-        """Add types together"""
-        return cls.create(
-            _construct_title(cls) + _construct_title(_python_to_wtype(object)),
-            **(_get_schema_from_typeish(object) or {}),
+        # Cycle through dicts and lists
+        if isinstance(object, dict):
+            return type(cls.__name__ + object.__name__, (cls,), dict(), **object)
+        return type(
+            cls.__name__ + object.__name__,
+            (cls,),
+            dict(),
+            py=object,
+            **getattr(object, "_schema", {}),
         )
 
 
@@ -221,45 +279,9 @@ _schema : dict
 
 """
 
-    _schema = None
-
-    def _merge_schema(cls):
-        """Merge schema from the module resolution order."""
-        schema = munch.Munch()
-        for self in reversed(cls.__mro__):
-            current = getattr(self, "_schema", {})
-            if isinstance(current, dict):
-                for k, v in current.items():
-                    if isinstance(v, list):
-                        if k not in schema:
-                            schema[k] = list()
-                        schema[k] += v
-                    elif isinstance(v, dict):
-                        if k not in schema:
-                            schema[k] = dict()
-                        schema[k].update(v)
-                    else:
-                        schema[k] = v
-        if "required" in schema:
-            # Make required a unique list.
-            schema["required"] = list(set(schema["required"]))
-        if "properties" in schema:
-            schema.properties.pop("", None)
-        cls._schema = schema
-
-    def __new__(cls, name, base, kwargs, **schema):
-        kwargs.update(_schema=schema or None)
-        cls = super().__new__(cls, name, base, kwargs)
-        # Combine metadata across the module resolution order.
-        cls._merge_annotations(), cls._merge_schema()
-        if isinstance(cls._schema, dict):
-            wtypes.manager.hook.validate_type(type=cls)
-        """Validate the proposed schema against the jsonschema schema."""
-        return cls
-
     def __neg__(cls):
         """The Not version of a type."""
-        return Not[cls]
+        return wtypes.combining_types.Not[cls]
 
     def __pos__(cls):
         """The type."""
@@ -267,18 +289,19 @@ _schema : dict
 
     def __and__(cls, object):
         """AllOf the conditions"""
-        return AllOf[cls, object]
+        return wtypes.combining_types.AllOf[cls, object]
 
     def __sub__(cls, object):
         """AnyOf the conditions"""
-        return AnyOf[cls, object]
+        return wtypes.combining_types.AnyOf[cls, object]
 
     def __or__(cls, object):
         """OneOf the conditions"""
-        return OneOf[cls, object]
+        return wtypes.combining_types.OneOf[cls, object]
 
     def validate(cls, object):
         """Validate an object against type's schema.
+        
         
         
 Note
@@ -310,7 +333,7 @@ The bracketed notebook should differeniate actions on types versus those on obje
     def __getitem__(cls, object):
         if isinstance(object, tuple):
             object = list(object)
-        return cls.create(cls.__name__, **{_lower_key(cls.__name__): object})
+        return type(cls.__name__, (cls,), {}, **{_lower_key(cls.__name__): object})
 
 
 class _ContainerType(_ConstType):
@@ -329,24 +352,6 @@ class _ContainerType(_ConstType):
             else:
                 schema = _get_schema_from_typeish(object)
         return cls + Trait.create(schema_key, **{schema_key: schema})
-
-
-class _ContextType(_SchemaMeta):
-    """Update contextual type features.
-            
-Note
-----
-The bracketed notebook should differeniate actions on types versus those on objects.
-"""
-
-    def __getitem__(cls, object):
-        """start rdf stuff."""
-        object = _get_schema_from_typeish(object)
-        if isinstance(object, tuple):
-            object = list(object)
-        return cls.create(
-            cls.__name__, **{_lower_key(cls.__name__): _get_schema_from_typeish(object)}
-        )
 
 
 def _python_to_wtype(object):
@@ -376,17 +381,17 @@ def _python_to_wtype(object):
     return object
 
 
-def _get_schema_from_typeish(object):
+def _get_schema_from_typeish(object, key="anyOf"):
     """infer a schema from an object."""
     if isinstance(object, typing._GenericAlias):
         # This is a typing union.
         if object.__origin__ is typing.Union:
             return munch.Munch.fromDict(
-                dict(
-                    anyOf=list(
+                {
+                    key: list(
                         filter(bool, map(_get_schema_from_typeish, object.__args__))
                     )
-                )
+                }
             )
         if object.__origin__ is tuple:
             return _get_schema_from_typeish(Tuple[object.__args__])
@@ -475,13 +480,17 @@ object
             cls.validate(self)
         elif isinstance(cls, _ConstType) and args:
             cls.validate(args[0])
-            self = _object_to_webtype(args[0])(args[0])
-
+            current_type = type(args[0])
+            candidate_type = _python_to_wtype(current_type)
+            self = args[0]
+            if candidate_type is not current_type:
+                self = candidate_type(args[0])
         else:
             args = cls._resolve_defaults(*args, **kwargs)
+            args and cls.validate(*args)
             self = super().__new__(cls, *args, **kwargs)
             # self.__init__(*args, **kwargs)
-            args or cls.validate(self)
+
         return self
 
     @classmethod
@@ -739,7 +748,7 @@ Examples
             object = (object,)
         return (
             type(cls.__name__, (cls,), {"__annotations__": {"": typing.Union[object]}})
-            + AdditionalProperties[AnyOf[object]]
+            + AdditionalProperties[wtypes.AnyOf[object]]
         )
 
 
@@ -796,9 +805,11 @@ Examples
     """
 
     def __new__(cls, *args, **kwargs):
-
-        args = (dict(*args, **kwargs),) if args or kwargs else cls._resolve_defaults()
-
+        default = cls._resolve_defaults()
+        if default:
+            args = ({**default[0], **dict(*args, **kwargs)},)
+        else:
+            args = (dict(*args, **kwargs),)
         self = super().__new__(cls, *args)
         self.__init__(*args)
         wtypes.manager.hook.validate_object(object=self, schema=type(self))
@@ -806,25 +817,14 @@ Examples
 
     def __setitem__(self, key, object):
         """Only test the key being set to avoid invalid state."""
-        properties = self._schema.get("properties", {})
-        tmp = type(
-            "tmp",
-            (Dict,),
-            {
-                "__annotations__": {
-                    key: self.__annotations__.get(
-                        key,
-                        type(
-                            "tmp",
-                            (Trait,),
-                            {},
-                            **self._schema.get("properties", {}).get(key, {}),
-                        ),
-                    )
-                }
-            },
+        if not self._schema.get("additionalProperties", True):
+            if key not in self._schema.get("properties", {}):
+                raise ValidationError(f"Additional key {key} not allowed.")
+        cls = self.__annotations__.get(
+            key,
+            self.__annotations__.get("", self._schema.get("properties", {}).get(key)),
         )
-        wtypes.manager.hook.validate_object(object={key: object}, schema=tmp)
+        wtypes.python_types._validate_generic_alias(object, cls)
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
@@ -976,36 +976,37 @@ class _ListSchema(_SchemaMeta):
 Examples
 --------
 
-    >>> List[wtypes.Forward[range], int].__annotations__
-    {'': typing.List[typing.Union[abc.Forward, int]]}
+    >>> List[wtypes.Forward[range], int]._type
+    typing.List[typing.Union[abc.Forward, int]]
 
-    >>> Tuple[wtypes.Forward[range], int].__annotations__
-    {'': typing.Tuple[abc.Forward, int]}
+    >>> Tuple[wtypes.Forward[range], int]._type
+    typing.Tuple[abc.Forward, int]
 
         """
         if istype(cls, Tuple):
             if not isinstance(object, tuple):
                 object = (object,)
-            return (
-                type(
-                    cls.__name__,
-                    (cls,),
-                    {"__annotations__": {"": typing.Tuple[object]}},
-                )
-                + Items[list(object)]
+            return type(
+                cls.__name__,
+                (cls,),
+                {},
+                py=typing.Tuple[object],
+                items=list(map(_get_schema_from_typeish, object)),
             )
         elif isinstance(object, tuple):
-            return (
-                type(
-                    cls.__name__,
-                    (cls,),
-                    {"__annotations__": {"": typing.List[typing.Union[object]]}},
-                )
-                + Items[AnyOf[object]]
+            return type(
+                cls.__name__,
+                (cls,),
+                {},
+                py=typing.List[typing.Union[object]],
+                items=_get_schema_from_typeish(typing.Union[object]),
             )
-        return (
-            type(cls.__name__, (cls,), {"__annotations__": {"": object}})
-            + Items[object]
+        return type(
+            cls.__name__,
+            (cls,),
+            {},
+            py=typing.List[object],
+            items=_get_schema_from_typeish(object),
         )
 
     def __gt__(cls, object):
@@ -1051,7 +1052,8 @@ Tuple
     """
 
     def __new__(cls, *args, **kwargs):
-        args = cls._resolve_defaults(*args)
+        args = cls._resolve_defaults(*args) or ([],)
+
         if args and isinstance(args[0], tuple):
             args = (list(args[0]) + list(args[1:]),)
         args and cls.validate(args[0])
@@ -1059,23 +1061,32 @@ Tuple
         return self
 
     def _verify_item(self, object, id=None):
+        """Elemental verification for interactive type checking."""
         items = self._schema.get("items", None)
-        if items:
+        if items or "" in self.__annotations__:
             if isinstance(items, dict):
                 if isinstance(id, slice):
-                    type(self).validate(object)
+                    wtypes.python_types._validate_generic_alias(object, self._type)
                 else:
-                    wtypes.manager.hook.validate_object(object=object, schema=items)
+                    wtypes.python_types._validate_generic_alias([object], self._type)
             elif isinstance(items, list):
                 if isinstance(id, slice):
                     # condition for negative slices
-                    Tuple[tuple(items[id])].validate(object)
+                    if isinstance(self._type, typing.Generic):
+                        wtypes.python_types._validate_generic_alias(
+                            object, typing.Tuple[tuple(self._type.__args__[id])]
+                        )
                 elif isinstance(id, int):
                     # condition for negative integers
                     if id < len(items):
-                        wtypes.manager.hook.validate_object(
-                            object=object, schema=items[id]
-                        )
+                        if isinstance(self._type, typing.Generic):
+                            wtypes.python_types._validate_generic_alias(
+                                object, self._type.__args__[id]
+                            )
+                        else:
+                            wtypes.python_types._validate_generic_alias(
+                                object, items[id]
+                            )
 
     def __setitem__(self, id, object):
         self._verify_item(object, id)
@@ -1185,74 +1196,6 @@ class MinItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
 
 class MaxItems(Trait, _NoInit, _NoTitle, metaclass=_ConstType):
     """Maximum length of an array."""
-
-
-# ## Combining Schema
-
-
-class Not(Trait, metaclass=_ContainerType):
-    """not schema.
-    
-
-Examples
---------
-    
-    >>> assert Not[String](100) == 100   
-    >>> assert not isinstance('abc', Not[String])
-    
-Note
-----
-See the __neg__ method for symbollic not composition.
-
-.. Not
-    https://json-schema.org/understanding-json-schema/reference/combining.html#not
-"""
-
-
-class AnyOf(Trait, _NoInit, metaclass=_ContainerType):
-    """anyOf combined schema.
-    
-Examples
---------
-
-    >>> assert AnyOf[Integer, String]('abc')
-    >>> assert isinstance(10, AnyOf[Integer, String])
-    >>> assert not isinstance([], AnyOf[Integer, String])
-    
-.. anyOf
-    https://json-schema.org/understanding-json-schema/reference/combining.html#anyof
-"""
-
-
-class AllOf(Trait, _NoInit, metaclass=_ContainerType):
-    """allOf combined schema.
-    
-Examples
---------
-
-    >>> assert AllOf[Float>0, Integer/3](9)
-    >>> assert isinstance(9, AllOf[Float>0, Integer/3])
-    >>> assert not isinstance(-9, AllOf[Float>0, Integer/3])
-    
-.. allOf
-    https://json-schema.org/understanding-json-schema/reference/combining.html#allof
-"""
-
-
-class OneOf(Trait, metaclass=_ContainerType):
-    """oneOf combined schema.
-
-Examples
---------
-
-    >>> assert OneOf[Float>0, Integer/3](-9)
-    >>> assert isinstance(-9, OneOf[Float>0, Integer/3])
-    >>> assert not isinstance(9, OneOf[Float>0, Integer/3])
-
-    
-.. oneOf
-    https://json-schema.org/understanding-json-schema/reference/combining.html#oneof
-"""
 
 
 class Enum(Trait, metaclass=_ConstType):
