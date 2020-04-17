@@ -46,7 +46,7 @@ class _AnyOfType(wtypes.base._ConstType):
     def validate(cls, object):
         try:
             super().validate(object)
-        except ValidationError as error:
+        except wtypes.ValidationError as error:
             wtypes.validate_generic(object, cls._type)
 
     def __getitem__(cls, object):
