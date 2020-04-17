@@ -70,14 +70,14 @@ class wtypes_impl(spec_impl):
                     this._registered_links[source][id(that)][target].append(callable)
                 return this
 
-            elif isinstance(that, wtypes.python_types.Forward["ipywidgets.Widget"]):
+            elif isinstance(that, wtypes.python_types.Instance["ipywidgets.Widget"]):
                 this.observe(source, lambda x: setattr(that, target, x["new"]))
             elif isinstance(
                 that, wtypes.python_types.Forward["param.parameterized.Parameterized"]
             ):
                 this.observe(source, lambda x: setattr(that, target, x["new"]))
 
-        elif isinstance(this, wtypes.python_types.Forward["ipywidgets.Widget"]):
+        elif isinstance(this, wtypes.python_types.Instance["ipywidgets.Widget"]):
             this.observe(lambda x: that.__setitem__(target, x["new"]), source)
         elif isinstance(
             this, wtypes.python_types.Forward["param.parameterized.Parameterized"]
@@ -88,7 +88,9 @@ class wtypes_impl(spec_impl):
                     for event in events:
                         set_jawn(that, target, event.new)
 
-            this.param.watch(param_wrap(this, that, target), source)
+                return callback
+
+            this.param.watch(param_wrap(this, that, target), ["value"])
 
 
 wtypes.manager.add_hookspecs(spec)
@@ -113,7 +115,7 @@ class Link:
             self._propagate()
             self._update_display()
 
-    def link(this, source, that, target):
+    def link(this, source, that, target="value"):
         wtypes.manager.hook.dlink(
             this=this, source=source, that=that, target=target, callable=None
         )
