@@ -18,10 +18,7 @@ class Setter:
         else:
             return builtins.object.__setattr__(self, key, object)
 
-        if hasattr(cls, "validate"):
-            cls.validate(object)
-        else:
-            wtypes.validate_generic(object, cls)
+        wtypes.base.Validate.validate(object, cls)
 
         builtins.object.__setattr__(self, key, object)
 

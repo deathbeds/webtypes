@@ -30,81 +30,7 @@ import wtypes
 
 ValidationError = jsonschema.ValidationError
 
-
-class _Implementation:
-    """An implementation of the pluggy wtypes spec.
-    
-Notes
------
-The implementation needs to be registered with the plugin manager.    
-"""
-
-    @wtypes.implementation
-    def validate_type(type):
-        jsonschema.validate(
-            _get_schema_from_typeish(type),
-            jsonschema.Draft7Validator.META_SCHEMA,
-            format_checker=jsonschema.draft7_format_checker,
-        )
-        return True
-
-    @wtypes.implementation
-    def validate_object(object, schema):
-        validate = munch.Munch.fromDict(schema)
-        if dataclasses.is_dataclass(object):
-            object = vars(object)
-        if isinstance(schema, type):
-            if hasattr(schema, "_schema"):
-                if isinstance(schema._schema, dict):
-                    validate = schema._schema
-        if "properties" in validate:
-            annotations = getattr(schema, "__annotations__", {})
-            for property in list(validate["properties"]):
-                if property in annotations or "" in annotations:
-                    target = schema.__annotations__.get(
-                        property, schema.__annotations__.get("")
-                    )
-                    if isinstance(object, typing.Mapping) and property in object:
-                        thing = object[property]
-                    elif hasattr(object, property):
-                        thing = getattr(object, property)
-                    else:
-                        continue
-
-                    if hasattr(target, "validate"):
-                        target.validate(thing)
-                    else:
-                        wtypes.validate_generic(thing, target)
-
-            validate = {
-                **validate,
-                "properties": {
-                    **validate["properties"],
-                    **{x: {} for x in validate["properties"]},
-                },
-            }
-        jsonschema.validate(
-            object, validate, format_checker=jsonschema.draft7_format_checker
-        )
-        return True
-
-
-wtypes.manager.register(_Implementation)
-
-
-def istype(object, cls):
-    """instance(object, type) and issubclass(object, cls)
-    
-Examples
---------
-
-    >>> assert istype(int, int)
-    >>> assert not istype(10, int)
-    
-"""
-    if isinstance(object, type):
-        return issubclass(object, cls)
-    return False
+Validate = wtypes.validate.Validate
 
 
 class _NoTitle:
@@ -157,9 +83,13 @@ A context type cannot be verified as it only describes, althrough some descripto
             kwargs.update({"_type_kwargs": schema.pop("keywords")})
         cls = super().__new__(cls, name, base, kwargs)
         cls._merge_context(), cls._merge_annotations(), cls._merge_types(), cls._merge_schema(), cls._merge_args()
-        if isinstance(cls._schema, dict):
-            wtypes.manager.hook.validate_type(type=cls)
+        cls._validate_type()
         return cls
+
+    def _validate_type(cls):
+        Validate.validate(
+            _get_schema_from_typeish(cls), jsonschema.Draft7Validator.META_SCHEMA
+        )
 
     def _merge_args(cls):
         args, kwargs = [], {}
@@ -245,7 +175,7 @@ A context type cannot be verified as it only describes, althrough some descripto
 
     def validate(cls, object):
         """A context type does not validate."""
-        wtypes.manager.hook.validate_object(object=object, schema=cls)
+        Validate.validate(object, cls)
 
     def __instancecheck__(cls, object):
         try:
@@ -362,7 +292,8 @@ jsonschema.ValidationError
     The ``jsonschema`` module validation throws an exception on failure,
     otherwise the returns a None type.
 """
-        wtypes.manager.hook.validate_object(object=object, schema=cls)
+        Validate.validate(object, cls._schema)
+        Validate.validate(object, cls._type)
 
 
 class _ConstType(_SchemaMeta):
@@ -485,7 +416,7 @@ def _object_to_webtype(object):
 
 
 def _construct_title(cls):
-    if istype(cls, _NoTitle):
+    if wtypes.utils.istype(cls, _NoTitle):
         return ""
     if isinstance(cls._schema, dict):
         return cls._schema.get("title", cls.__name__)
@@ -522,7 +453,7 @@ object
             self.__init__(*args, **kwargs)
             cls.validate(self)
         elif isinstance(cls, _ConstType) and args:
-            wtypes.validate_generic(args[0], getattr(cls, "_type", cls))
+            Validate.validate(args[0], getattr(cls, "_type", cls))
             current_type = type(args[0])
             candidate_type = _python_to_wtype(current_type)
             self = args[0]
@@ -822,7 +753,7 @@ class Dict(Trait, dict, _Object):
 Examples
 --------
 
-    >>> assert istype(Dict, __import__('collections').abc.MutableMapping)
+    >>> assert wtypes.utils.istype(Dict, __import__('collections').abc.MutableMapping)
     >>> assert (Dict + Default[{'b': 'foo'}])() == {'b': 'foo'}
     >>> assert (Dict + Default[{'b': 'foo'}])({'a': 'bar'}) == {'b': 'foo', 'a': 'bar'}
 
@@ -855,7 +786,7 @@ Examples
             args = (dict(*args, **kwargs),)
         self = super().__new__(cls, *args)
         self.__init__(*args)
-        wtypes.manager.hook.validate_object(object=self, schema=type(self))
+        cls.validate(self)
         return self
 
     def __setitem__(self, key, object):
@@ -867,7 +798,7 @@ Examples
             key,
             self.__annotations__.get("", self._schema.get("properties", {}).get(key)),
         )
-        wtypes.validate_generic(object, cls)
+        Validate.validate(object, cls)
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
@@ -890,7 +821,7 @@ Examples
                 }
             },
         )
-        wtypes.manager.hook.validate_object(object=args[0], schema=tmp)
+        Validate.validate(args[0], tmp)
         super().update(*args, **kwargs)
 
 
@@ -1026,7 +957,7 @@ Examples
     typing.Tuple[abc.Forward, int]
 
         """
-        if istype(cls, Tuple):
+        if wtypes.utils.istype(cls, Tuple):
             if not isinstance(object, tuple):
                 object = (object,)
             return type(
@@ -1109,23 +1040,23 @@ Tuple
         if items or "" in self.__annotations__:
             if isinstance(items, dict):
                 if isinstance(id, slice):
-                    wtypes.validate_generic(object, self._type)
+                    Validate.validate(object, self._type)
                 else:
-                    wtypes.validate_generic([object], self._type)
+                    Validate.validate([object], self._type)
             elif isinstance(items, list):
                 if isinstance(id, slice):
                     # condition for negative slices
                     if isinstance(self._type, typing.Generic):
-                        wtypes.validate_generic(
+                        Validate.validate(
                             object, typing.Tuple[tuple(self._type.__args__[id])]
                         )
                 elif isinstance(id, int):
                     # condition for negative integers
                     if id < len(items):
                         if isinstance(self._type, typing.Generic):
-                            wtypes.validate_generic(object, self._type.__args__[id])
+                            Validate.validate(object, self._type.__args__[id])
                         else:
-                            wtypes.validate_generic(object, items[id])
+                            Validate.validate(object, items[id])
 
     def __setitem__(self, id, object):
         self._verify_item(object, id)

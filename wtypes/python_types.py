@@ -150,4 +150,4 @@ Deffered references.
 
     @classmethod
     def validate(cls, object):
-        wtypes.validate_generic(object, cls.eval())
+        wtypes.base.Validate.validate(object, cls.eval())

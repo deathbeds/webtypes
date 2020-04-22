@@ -22,6 +22,7 @@ Todo
 __version__ = "0.0.2"
 
 from .spec import *  # isort:skip
+from . import validate  # isort:skip
 from .utils import *  # isort:skip
 from .base import *  # isort:skip
 from . import examples  # isort:skip
