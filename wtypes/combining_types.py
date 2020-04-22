@@ -7,7 +7,7 @@ class _NotType(wtypes.base._ConstType):
     def validate(cls, object):
         super().validate(object)
         try:
-            cls._type and not wtypes.validate_generic(object, cls._type)
+            not wtypes.base.ValidationError.validate(object, cls)
             raise wtypes.ValidationError(f"{object} is an instance of {cls._type}")
         except wtypes.ValidationError:
             ...
@@ -80,7 +80,7 @@ class _AllOfType(wtypes.base._ConstType):
     def validate(cls, object):
         super().validate(object)
         [
-            wtypes.validate_generic(object, t)
+            wtypes.base.Validate.validate(object, t)
             for t in (
                 cls._type.__args__
                 if isinstance(cls._type, typing._GenericAlias)
@@ -124,7 +124,7 @@ class _OneOfType(wtypes.base._ConstType):
             else (cls._type,)
         ):
             try:
-                wtypes.validate_generic(object, t)
+                wtypes.base.Validate.validate(object, t)
                 success += 1
                 if success > 1:
                     break
@@ -132,7 +132,7 @@ class _OneOfType(wtypes.base._ConstType):
                 ...
         else:
             try:
-                wtypes.validate_generic(object, cls._schema)
+                wtypes.base.Validate.validate(object, cls._schema)
                 if success:
                     raise wtypes.ValidationError(
                         f"{object} matched too many types of {cls}"
