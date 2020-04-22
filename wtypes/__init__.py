@@ -33,3 +33,5 @@ from .python_types import *
 from .string_formats import *
 
 from . import evented  # isort:skip
+
+validate = validate.Validate.validate
