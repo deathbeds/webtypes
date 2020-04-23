@@ -28,9 +28,9 @@ import munch
 
 import wtypes
 
-ValidationError = jsonschema.ValidationError
+from .validation import validate
 
-validate = wtypes.validate
+ValidationError = jsonschema.ValidationError
 
 
 class _NoTitle:
@@ -739,10 +739,9 @@ class _Object(metaclass=_ObjectSchema, type="object"):
             ):
                 cls._schema.properties[key]["default"] = getattr(cls, key)
 
-    @classmethod
-    def from_config_file(cls, *object):
-        args = __import__("anyconfig").load(object)
-        return cls(args)
+    def load_config(self, object):
+        self.update(__import__("anyconfig").load(object))
+        return self
 
 
 class Dict(Trait, dict, _Object):

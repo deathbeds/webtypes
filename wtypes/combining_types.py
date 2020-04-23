@@ -7,7 +7,7 @@ class _NotType(wtypes.base._ConstType):
     def validate(cls, object):
         super().validate(object)
         try:
-            not wtypes.base.ValidationError.validate(object, cls)
+            not wtypes.base.validate(object, cls)
             raise wtypes.ValidationError(f"{object} is an instance of {cls._type}")
         except wtypes.ValidationError:
             ...

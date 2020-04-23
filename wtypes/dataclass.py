@@ -23,7 +23,7 @@ class Setter:
         builtins.object.__setattr__(self, key, object)
 
 
-class DataClass(Setter, wtypes.Trait, wtypes.base._Object):
+class DataClass(Setter, wtypes.base.Trait, wtypes.base._Object):
     """Validating dataclass type
     
 Examples
