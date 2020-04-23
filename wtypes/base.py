@@ -30,7 +30,7 @@ import wtypes
 
 ValidationError = jsonschema.ValidationError
 
-Validate = wtypes.validate.Validate
+validate = wtypes.validate
 
 
 class _NoTitle:
@@ -87,9 +87,7 @@ A context type cannot be verified as it only describes, althrough some descripto
         return cls
 
     def _validate_type(cls):
-        Validate.validate(
-            _get_schema_from_typeish(cls), jsonschema.Draft7Validator.META_SCHEMA
-        )
+        validate(_get_schema_from_typeish(cls), jsonschema.Draft7Validator.META_SCHEMA)
 
     def _merge_args(cls):
         args, kwargs = [], {}
@@ -175,7 +173,7 @@ A context type cannot be verified as it only describes, althrough some descripto
 
     def validate(cls, object):
         """A context type does not validate."""
-        Validate.validate(object, cls)
+        validate(object, cls)
 
     def __instancecheck__(cls, object):
         try:
@@ -292,8 +290,8 @@ jsonschema.ValidationError
     The ``jsonschema`` module validation throws an exception on failure,
     otherwise the returns a None type.
 """
-        Validate.validate(object, cls._schema)
-        Validate.validate(object, cls._type)
+        validate(object, cls._schema)
+        validate(object, cls._type)
 
 
 class _ConstType(_SchemaMeta):
@@ -453,7 +451,7 @@ object
             self.__init__(*args, **kwargs)
             cls.validate(self)
         elif isinstance(cls, _ConstType) and args:
-            Validate.validate(args[0], getattr(cls, "_type", cls))
+            validate(args[0], getattr(cls, "_type", cls))
             current_type = type(args[0])
             candidate_type = _python_to_wtype(current_type)
             self = args[0]
@@ -798,7 +796,7 @@ Examples
             key,
             self.__annotations__.get("", self._schema.get("properties", {}).get(key)),
         )
-        Validate.validate(object, cls)
+        validate(object, cls)
         super().__setitem__(key, object)
 
     def update(self, *args, **kwargs):
@@ -821,7 +819,7 @@ Examples
                 }
             },
         )
-        Validate.validate(args[0], tmp)
+        validate(args[0], tmp)
         super().update(*args, **kwargs)
 
 
@@ -1040,23 +1038,21 @@ Tuple
         if items or "" in self.__annotations__:
             if isinstance(items, dict):
                 if isinstance(id, slice):
-                    Validate.validate(object, self._type)
+                    validate(object, self._type)
                 else:
-                    Validate.validate([object], self._type)
+                    validate([object], self._type)
             elif isinstance(items, list):
                 if isinstance(id, slice):
                     # condition for negative slices
                     if isinstance(self._type, typing.Generic):
-                        Validate.validate(
-                            object, typing.Tuple[tuple(self._type.__args__[id])]
-                        )
+                        validate(object, typing.Tuple[tuple(self._type.__args__[id])])
                 elif isinstance(id, int):
                     # condition for negative integers
                     if id < len(items):
                         if isinstance(self._type, typing.Generic):
-                            Validate.validate(object, self._type.__args__[id])
+                            validate(object, self._type.__args__[id])
                         else:
-                            Validate.validate(object, items[id])
+                            validate(object, items[id])
 
     def __setitem__(self, id, object):
         self._verify_item(object, id)

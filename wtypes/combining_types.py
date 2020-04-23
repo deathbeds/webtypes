@@ -80,7 +80,7 @@ class _AllOfType(wtypes.base._ConstType):
     def validate(cls, object):
         super().validate(object)
         [
-            wtypes.base.Validate.validate(object, t)
+            wtypes.validate(object, t)
             for t in (
                 cls._type.__args__
                 if isinstance(cls._type, typing._GenericAlias)
@@ -124,7 +124,7 @@ class _OneOfType(wtypes.base._ConstType):
             else (cls._type,)
         ):
             try:
-                wtypes.base.Validate.validate(object, t)
+                wtypes.validate(object, t)
                 success += 1
                 if success > 1:
                     break
@@ -132,7 +132,7 @@ class _OneOfType(wtypes.base._ConstType):
                 ...
         else:
             try:
-                wtypes.base.Validate.validate(object, cls._schema)
+                wtypes.validate(object, cls._schema)
                 if success:
                     raise wtypes.ValidationError(
                         f"{object} matched too many types of {cls}"

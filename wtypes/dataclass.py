@@ -18,7 +18,7 @@ class Setter:
         else:
             return builtins.object.__setattr__(self, key, object)
 
-        wtypes.base.Validate.validate(object, cls)
+        wtypes.validate(object, cls)
 
         builtins.object.__setattr__(self, key, object)
 
