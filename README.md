@@ -1,5 +1,5 @@
 A extended trait and type system for python using `jsonschema`. 
-
+ 
 `wtypes` is an extended type and trait system for python.
 
 * [Documentation](https://wtypes.readthedocs.io/)
