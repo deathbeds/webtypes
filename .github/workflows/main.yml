@@ -27,7 +27,7 @@ jobs:
         pip install .
     - name: Test with pytest
       run: |
-        pip install pytest pytest-cov importnb .[examples]
+        pip install pytest multipledispatch pytest-cov importnb .[examples]
         pytest --doctest-modules -p no:warnings
         
     - name: Publish package
